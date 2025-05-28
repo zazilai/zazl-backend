@@ -1,32 +1,31 @@
+// services/groovoo.js
 const axios = require('axios');
 
-/**
- * Fetch upcoming Groovoo events (Brazil-related, US-based).
- * Returns an array of simplified event objects:
- *   [{ id, name, date, city, url }]
- */
-exports.getEvents = async (query = '') => {
-  // 1 Fetch the raw list
-  const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
+module.exports = {
+  /**
+   * Fetch upcoming events from Groovoo,
+   * filter out past dates, and normalize shape.
+   */
+  getEvents: async (userInput = '') => {
+    // 1. Hit the Groovoo API
+    const { data: events } = await axios.get(
+      'https://api.groovoo.io/ticketing_events'
+    );
 
-  // 2 Filter: future events only, optional text search
-  const now = Date.now();
-  const upcoming = data.filter(e => {
-    const start = new Date(e.start_at).getTime();
-    const matchesQuery =
-      !query || e.name?.toLowerCase().includes(query.toLowerCase());
-    return start >= now && matchesQuery;
-  });
+    const now = new Date();
 
-  // 3 Sort chronologically and keep the next 5
-  upcoming.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+    // 2. Keep only events in the future…
+    const upcoming = events.filter(e => {
+      if (!e.start_at) return false;
+      return new Date(e.start_at) >= now;
+    });
 
-  // 4 Map to the fields our reply helper expects
-  return upcoming.slice(0, 5).map(e => ({
-    id:   e.id,
-    name: e.name || 'Evento sem nome',
-    date: e.start_at,
-    city: e.address?.city || 'Local não informado',
-    url:  e.external_shop_url || e.voucher || ''
-  }));
+    // 3. Map into the shape your reply helper expects:
+    return upcoming.map(e => ({
+      name: e.name || 'Evento sem nome',
+      city: e.address?.city || 'Local não informado',
+      date: e.start_at,                 // ISO string, your reply.js will format it
+      url: e.voucher || e.external_shop_url || ''  // purchase link if any
+    }));
+  }
 };
