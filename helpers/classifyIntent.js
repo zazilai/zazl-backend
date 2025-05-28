@@ -1,8 +1,6 @@
 // helpers/classifyIntent.js
-
 require('dotenv').config();
 const { OpenAI } = require('openai');
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
@@ -25,9 +23,6 @@ Responda apenas pelo nome de uma das intenções:
       { role: 'user', content: text }
     ]
   });
-
   const intent = resp.choices[0].message.content.trim().toUpperCase();
-  return ['EVENT','FX','NEWS','GENERIC'].includes(intent)
-    ? intent
-    : 'GENERIC';
+  return ['EVENT','FX','NEWS','GENERIC'].includes(intent) ? intent : 'GENERIC';
 };
