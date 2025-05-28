@@ -4,7 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node src/index.cjs"
+    "start": "node index.cjs"
   },
   "dependencies": {
     "dotenv": "^16.0.4",
