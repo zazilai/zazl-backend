@@ -1,35 +1,33 @@
 // index.cjs
-require('dotenv').config();
-const express    = require('express');
-const bodyParser = require('body-parser');
-const admin      = require('firebase-admin');
-const { OpenAI } = require('openai');
+require('dotenv').config();                  // 1) load .env into process.env
+const express       = require('express');
+const bodyParser    = require('body-parser');
+const admin         = require('firebase-admin');
+const { OpenAI }    = require('openai');
 
-// Helpers & Services
-const classifyIntent  = require('./helpers/classifyIntent');
-const replyHelper     = require('./helpers/reply');
-const loggerMw        = require('./middleware/logger');
-const groovooService  = require('./services/groovoo');
-const dolarService    = require('./services/dolar');
-const newsService     = require('./services/news');
-const profileSvc      = require('./services/profile');
+// 2) your helpers & services
+const classifyIntent = require('./helpers/classifyIntent');
+const replyHelper    = require('./helpers/reply');
+const loggerMw       = require('./middleware/logger');
+const groovooService = require('./services/groovoo');
+const dolarService   = require('./services/dolar');
+const newsService    = require('./services/news');
+const profileSvc     = require('./services/profile');
 
-// init Firebase + Firestore
-admin.initializeApp({ credential: admin.credential.applicationDefault() });
+// 3) init SDKs
+admin.initializeApp({
+  credential: admin.credential.applicationDefault()
+});
 const db = admin.firestore();
 
-// init OpenAI
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// init Express
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// ─── Health check ─────────────────────────────────────────────────────────────
-app.get('/', (req, res) => res.send('✅ Zazil backend up'));
-
-// ─── Public dólⱥr endpoint ────────────────────────────────────────────────────
+// 4) health-check & FX endpoint
+app.get('/',        (req, res) => res.send('✅ Zazil backend up'));
 app.get('/api/dolar', async (req, res) => {
   try {
     const rateObj = await dolarService.getRate();
@@ -39,19 +37,18 @@ app.get('/api/dolar', async (req, res) => {
   }
 });
 
-// ─── Twilio WhatsApp webhook ──────────────────────────────────────────────────
+// 5) Twilio WhatsApp webhook
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
 
   try {
-    // 1) Load or create user profile
+    // pull or create user profile
     await profileSvc.load(db, waNumber);
 
-    // 2) Intent classification
+    // 1️⃣ classify
     const intent = await classifyIntent(incoming);
 
-    // 3) Route to the right service
     let replyObj;
     switch (intent) {
       case 'EVENT': {
@@ -70,10 +67,10 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       default: {
-        // Generic fallback via GPT
+        // fallback GPT chat
         const gpt = await openai.chat.completions.create({
-          model:        'gpt-4o-mini',
-          temperature:  0.7,
+          model: 'gpt-4o-mini',
+          temperature: 0.7,
           messages: [
             { role: 'system', content: process.env.ZAZIL_PROMPT },
             { role: 'user',   content: incoming }
@@ -83,22 +80,29 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // 4) Persist usage
+    // persist usage
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    // 5) Send TwiML back
-    res.type('text/xml');
-    const safe = (typeof replyObj.content === 'string')
+    // never pass null/undefined down to Twilio
+    const safeContent =
+      typeof replyObj.content === 'string' && replyObj.content.trim()
       ? replyObj.content
       : 'Desculpe, não consegui entender.';
-    res.send(`<Response><Message>${safe}</Message></Response>`);
+
+    res.type('text/xml');
+    res.send(
+      `<Response><Message>${safeContent}</Message></Response>`
+    );
+
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
     res.type('text/xml');
-    res.send(`<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde.</Message></Response>`);
+    res.send(
+      `<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde.</Message></Response>`
+    );
   }
 });
 
-// ─── Start server ─────────────────────────────────────────────────────────────
+// 6) start
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
