@@ -16,8 +16,13 @@ const dolarService    = require('./services/dolar');
 const newsService     = require('./services/news');
 const profileSvc      = require('./services/profile');
 
-// Init Firebase + OpenAI
-admin.initializeApp({ credential: admin.credential.applicationDefault() });
+// Firebase Init from FIREBASE_KEY_JSON
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 const db     = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -39,7 +44,7 @@ app.get('/api/dolar', async (req, res) => {
   }
 });
 
-// ── View full GPT reply ───────────────
+// ── Web view for long replies ─────────
 app.get('/view/:id', async (req, res) => {
   try {
     const snap = await db.collection('responses').doc(req.params.id).get();
@@ -117,7 +122,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
         let content = gpt.choices?.[0]?.message?.content || '';
 
-        // Save full content to Firestore
+        // Save full GPT reply to Firestore
         const docRef = await db.collection('responses').add({
           user: waNumber,
           prompt: incoming,
@@ -127,7 +132,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
         const docId = docRef.id;
 
-        // Truncate for WhatsApp (1600 chars max)
+        // Trim for WhatsApp
         const MAX_LEN = 1600;
         if (content.length > MAX_LEN) {
           const cut = content.lastIndexOf('\n', MAX_LEN);
@@ -157,6 +162,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   }
 });
 
-// ── Launch ─────────────────────────────
+// ── Launch App ────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
