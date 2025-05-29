@@ -111,6 +111,9 @@ app.post(
     } catch (err) {
       console.error('[twilio-whatsapp] error:', err);
       res.type('text/xml');
+      const safeContent = typeof replyObj.content === 'string'
+  ? replyObj.content
+  : 'Desculpe, não consegui entender.';
       res.send(
         `<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde.</Message></Response>`
       );
