@@ -1,2 +1,15 @@
-# local environment variables
+# Firebase key
+config/serviceAccountKey.json
+
+# Node dependencies
+node_modules/
+
+# Local config
 .env
+
+# Logs
+*.log
+logs/
+
+# macOS system files
+.DS_Store
