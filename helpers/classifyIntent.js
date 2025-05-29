@@ -1,11 +1,12 @@
 // helpers/classifyIntent.js
 require('dotenv').config();
 const { OpenAI } = require('openai');
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Ask GPT to classify the user’s text into one of 4 intents.
- * Returns exactly 'EVENT', 'FX', 'NEWS' or 'GENERIC'.
+ * Returns exactly 'EVENT', 'FX', 'NEWS' or 'GENERIC'
  */
 module.exports = async function classifyIntent(text = '') {
   const resp = await openai.chat.completions.create({
@@ -13,20 +14,22 @@ module.exports = async function classifyIntent(text = '') {
     temperature: 0,
     messages: [
       {
-        role:  'system',
-        content: `Você é um detector de intenção.
-Responda apenas pelo nome de uma das intenções:
-• EVENT para perguntas sobre eventos
-• FX    para cotações de moeda (dólar/euro)
-• NEWS  para notícias
-• GENERIC para todo o resto`
+        role: 'system',
+        content: `
+You are an intent detector.
+Answer with exactly one of:
+• EVENT   – for questions about events
+• FX      – for currency quotes (dólar/euro)
+• NEWS    – for news digests
+• GENERIC – everything else`
       },
       { role: 'user', content: text }
     ]
   });
 
   const intent = resp.choices[0].message.content.trim().toUpperCase();
-  return ['EVENT','FX','NEWS','GENERIC'].includes(intent)
-    ? intent
-    : 'GENERIC';
+  if (['EVENT','FX','NEWS','GENERIC'].includes(intent)) {
+    return intent;
+  }
+  return 'GENERIC';
 };
