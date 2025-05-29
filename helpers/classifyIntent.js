@@ -27,6 +27,6 @@ Answer with exactly one of:
     ]
   });
 
-  const intent = resp.choices[0].message.content.trim().toUpperCase();
-  return ['EVENT','FX','NEWS','GENERIC'].includes(intent) ? intent : 'GENERIC';
+  const answer = resp.choices?.[0]?.message?.content?.trim().toUpperCase();
+  return ['EVENT','FX','NEWS','GENERIC'].includes(answer) ? answer : 'GENERIC';
 };
