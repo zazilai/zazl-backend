@@ -1,7 +1,16 @@
 // helpers/reply.js
 exports.generic = msg => ({ content: msg });
-exports.dolar   = rateObj => ({ content: `US$1 = R$${rateObj.rate}` });
+function dolar(rate) {
+  if (!rate || !rate.buy || !rate.sell) {
+    return {
+      content: "❌ Desculpe, não consegui obter a cotação do dólar agora. Tente novamente em alguns minutos."
+    };
+  }
 
+  return {
+    content: `💵 *Cotação do Dólar Hoje (USD → BRL)*\n\n• 📥 Compra: R$${rate.buy.toFixed(2)}\n• 📤 Venda: R$${rate.sell.toFixed(2)}\n\n🕒 Atualizado em tempo real via AwesomeAPI`
+  };
+}
 const dayjs = require('dayjs');
 require('dayjs/locale/pt-br');
 dayjs.locale('pt-br');
