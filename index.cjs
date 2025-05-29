@@ -17,7 +17,7 @@ const newsService     = require('./services/news');
 const profileSvc      = require('./services/profile');
 
 // Firebase Init from FIREBASE_KEY_JSON
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
+const serviceAccount = require('./config/serviceAccountKey.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
