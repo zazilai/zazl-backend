@@ -5,8 +5,8 @@ const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
- * Ask GPT to classify the user’s text into one of 4 intents.
- * Returns exactly 'EVENT', 'FX', 'NEWS' or 'GENERIC'
+ * Ask GPT to classify the user’s text into one of exactly
+ * 'EVENT' | 'FX' | 'NEWS' | 'GENERIC'.
  */
 module.exports = async function classifyIntent(text = '') {
   const resp = await openai.chat.completions.create({
@@ -21,12 +21,15 @@ Answer with exactly one of:
 • EVENT   for questions about events
 • FX      for currency quotes (dólar/euro)
 • NEWS    for news digests
-• GENERIC everything else`.trim()
+• GENERIC everything else
+`.trim()
       },
       { role: 'user', content: text }
     ]
   });
 
-  const answer = resp.choices?.[0]?.message?.content?.trim().toUpperCase();
-  return ['EVENT','FX','NEWS','GENERIC'].includes(answer) ? answer : 'GENERIC';
+  const intent = resp.choices[0].message.content.trim().toUpperCase();
+  return ['EVENT','FX','NEWS','GENERIC'].includes(intent)
+    ? intent
+    : 'GENERIC';
 };
