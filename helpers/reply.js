@@ -1,14 +1,11 @@
-// helpers/reply.js
 const dayjs = require('dayjs');
 require('dayjs/locale/pt-br');
 dayjs.locale('pt-br');
 
-// Generic fallback
 function generic(msg) {
   return { content: msg };
 }
 
-// FX (Dollar Rate)
 function dolar(rate) {
   if (!rate || !rate.buy || !rate.sell) {
     console.warn('[replyHelper] Invalid FX rate:', rate);
@@ -25,7 +22,6 @@ function dolar(rate) {
   return formatted;
 }
 
-// Groovoo Events
 function events(arr) {
   if (!arr.length) {
     return { content: "Hoje não encontrei eventos no Groovoo. 🤷‍♂️" };
@@ -40,7 +36,6 @@ function events(arr) {
   return { content: lines.join('\n\n') };
 }
 
-// News Digest
 function news(digest) {
   return { content: digest };
 }
