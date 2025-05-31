@@ -26,7 +26,6 @@ admin.initializeApp({
 const db     = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Express setup
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -77,26 +76,25 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
-    // Load or create user profile
     await profileSvc.load(db, waNumber);
 
-    // 1. Classify
     console.log('[twilio] about to classify intent…');
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
-    // 2. Dispatch
     let replyObj;
 
     switch (intent) {
       case 'EVENT': {
         const events = await groovooService.getEvents(incoming);
+        console.log('[EVENT] events fetched:', events);
         replyObj = replyHelper.events(events);
         break;
       }
 
       case 'FX': {
         const rate = await dolarService.getRate();
+        console.log('[FX] rate fetched:', rate);
         replyObj = replyHelper.dolar(rate);
         break;
       }
@@ -122,7 +120,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
         let content = gpt.choices?.[0]?.message?.content || '';
 
-        // Save full GPT reply to Firestore
         const docRef = await db.collection('responses').add({
           user: waNumber,
           prompt: incoming,
@@ -132,7 +129,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
         const docId = docRef.id;
 
-        // Trim for WhatsApp
         const MAX_LEN = 1600;
         if (content.length > MAX_LEN) {
           const cut = content.lastIndexOf('\n', MAX_LEN);
@@ -145,15 +141,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // 3. Record usage
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    // 4. Respond to Twilio
+    // ✅ Smart fallback to prevent silent failure
+    let safeContent = 'Desculpe, não consegui entender.';
+
+    if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
+      safeContent = replyObj.content;
+    } else {
+      console.warn('[Zazil] No replyObj or content found — using fallback.');
+    }
+
     res.type('text/xml');
-    const safeContent =
-      typeof replyObj.content === 'string' && replyObj.content
-        ? replyObj.content
-        : 'Desculpe, não consegui entender.';
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);

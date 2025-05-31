@@ -11,14 +11,18 @@ function generic(msg) {
 // FX (Dollar Rate)
 function dolar(rate) {
   if (!rate || !rate.buy || !rate.sell) {
+    console.warn('[replyHelper] Invalid FX rate:', rate);
     return {
       content: "❌ Desculpe, não consegui obter a cotação do dólar agora. Tente novamente em alguns minutos."
     };
   }
 
-  return {
-    content: `💵 *Cotação do Dólar Hoje (USD → BRL)*\n\n• 📥 Compra: R$${rate.buy.toFixed(2)}\n• 📤 Venda: R$${rate.sell.toFixed(2)}\n\n🕒 Atualizado em tempo real via AwesomeAPI`
+  const formatted = {
+    content: `💵 *Cotação do Dólar Hoje (USD → BRL)*\n\n• 📥 Compra: R$${rate.buy.toFixed(2)}\n• 📤 Venda: R$${rate.sell.toFixed(2)}\n\n🧠 Fonte: Zazil Finanças`
   };
+
+  console.log('[replyHelper] Returning FX content:', formatted);
+  return formatted;
 }
 
 // Groovoo Events
