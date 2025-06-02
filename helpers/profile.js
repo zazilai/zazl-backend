@@ -15,10 +15,13 @@ function getTodayKey() {
 }
 
 async function load(db, phone) {
+  console.log('[profile.js] load() triggered for:', phone);
+
   const ref = db.collection('profiles').doc(phone);
   const snap = await ref.get();
 
   if (!snap.exists) {
+    console.log('[profile.js] Creating new profile doc for', phone);
     await ref.set({
       phone,
       lang: 'pt',
@@ -33,6 +36,7 @@ async function load(db, phone) {
   const today = getTodayKey();
 
   if (!data.usage || !data.usage[today]) {
+    console.log('[profile.js] Initializing today\'s usage for', phone);
     await ref.update({
       [`usage.${today}`]: 0
     });
