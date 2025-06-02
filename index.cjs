@@ -12,6 +12,7 @@ const groovooService = require('./services/groovoo');
 const dolarService = require('./services/dolar');
 const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
+const stripeWebhook = require('./routes/webhook');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -134,4 +135,4 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
+app.use(stripeWebhook); app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
