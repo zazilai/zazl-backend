@@ -11,7 +11,7 @@ const loggerMw = require('./middleware/logger');
 const groovooService = require('./services/groovoo');
 const dolarService = require('./services/dolar');
 const newsService = require('./services/news');
-const profileSvc = require('./services/profile');
+const profileSvc = require('./helpers/profile');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -43,6 +43,17 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
   try {
     await profileSvc.load(db, waNumber);
+
+    // Enforce message quota
+    const quota = await profileSvc.getQuotaStatus(db, waNumber);
+    if (!quota.allowed) {
+      const msg = quota.plan === 'free'
+        ? '⚠️ Esta funcionalidade do Zazil está disponível apenas para assinantes do plano Lite ou Pro.'
+        : '⚠️ Você atingiu seu limite de mensagens hoje. Tente novamente amanhã ou faça upgrade para Pro ilimitado.';
+
+      res.type('text/xml');
+      return res.send(`<Response><Message>${msg}</Message></Response>`);
+    }
 
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
@@ -103,6 +114,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
+    // Update usage only after successful processing
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
     let safeContent = 'Desculpe, não consegui entender.';
