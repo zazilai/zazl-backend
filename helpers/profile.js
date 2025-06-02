@@ -1,6 +1,4 @@
-// helpers/profile.js
 const admin = require('firebase-admin');
-const db = admin.firestore();
 
 const DEFAULT_PLAN = 'free';
 const DAILY_LIMITS = {
@@ -17,7 +15,7 @@ function getTodayKey() {
 async function load(db, phone) {
   console.log('[profile.js] load() triggered for:', phone);
 
-  const ref = db.collection('profiles').doc(phone);
+  const ref = admin.firestore().collection('profiles').doc(phone);
   const snap = await ref.get();
 
   if (!snap.exists) {
@@ -36,7 +34,7 @@ async function load(db, phone) {
   const today = getTodayKey();
 
   if (!data.usage || !data.usage[today]) {
-    console.log('[profile.js] Initializing today\'s usage for', phone);
+    console.log("[profile.js] Initializing today's usage for", phone);
     await ref.update({
       [`usage.${today}`]: 0
     });
@@ -44,7 +42,7 @@ async function load(db, phone) {
 }
 
 async function updateUsage(db, phone, tokensUsed = 0) {
-  const ref = db.collection('profiles').doc(phone);
+  const ref = admin.firestore().collection('profiles').doc(phone);
   const today = getTodayKey();
   await ref.update({
     [`usage.${today}`]: admin.firestore.FieldValue.increment(1)
@@ -52,7 +50,7 @@ async function updateUsage(db, phone, tokensUsed = 0) {
 }
 
 async function getQuotaStatus(db, phone) {
-  const ref = db.collection('profiles').doc(phone);
+  const ref = admin.firestore().collection('profiles').doc(phone);
   const snap = await ref.get();
   if (!snap.exists) return { allowed: false, plan: 'free', used: 0 };
 
