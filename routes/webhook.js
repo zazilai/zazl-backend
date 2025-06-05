@@ -7,7 +7,6 @@ const admin = require('firebase-admin');
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-// Important: express.raw() must be used before any bodyParser middleware
 router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -23,15 +22,16 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
     const session = event.data.object;
 
     const whatsappNumber = session.metadata?.whatsapp_number;
-    const planId = session.metadata?.plan || '';
+    const planId = session.metadata?.plan || ''; // e.g., pro_month, lite_year
 
     if (!whatsappNumber || !planId) {
       console.error('[Stripe webhook] Missing metadata (whatsapp_number or plan)');
       return res.status(400).send('Missing required metadata');
     }
 
+    const profileId = `whatsapp:+${whatsappNumber.replace(/\D/g, '')}`;
     const db = admin.firestore();
-    const ref = db.collection('profiles').doc(whatsappNumber);
+    const ref = db.collection('profiles').doc(profileId);
 
     const isAnnual = planId.endsWith('_year');
     const plan = planId.includes('pro') ? 'pro' : 'lite';
@@ -50,7 +50,7 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
         { merge: true }
       );
 
-      console.log(`✅ Updated ${whatsappNumber} → Plan: ${plan}, Expires: ${expiresAt.toISOString()}`);
+      console.log(`✅ Updated ${profileId} → Plan: ${plan}, Expires: ${expiresAt.toISOString()}`);
     } catch (err) {
       console.error('[Stripe webhook] Firestore update failed:', err.message);
     }
