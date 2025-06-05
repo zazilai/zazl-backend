@@ -1,4 +1,3 @@
-// index.cjs
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -59,17 +58,17 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
-      const cleanWa = waNumber.replace(/^whatsapp:/, '').replace(/\D/g, '');
+      const cleanWa = waNumber.replace(/^whatsapp:/, ''); // preserve "+" prefix
       let msg = '⚠️ Você atingiu seu limite de mensagens hoje.\n\n';
 
       if (quota.plan === 'free' || quota.plan === 'trial') {
         msg += '🟢 Assinar Lite (15 msgs/dia):\n'
-             + `https://zazl.onrender.com/checkout/lite/month?whatsapp=${cleanWa}\n\n`
+             + `https://zazl-backend.onrender.com/checkout/lite/month?whatsapp=${encodeURIComponent(cleanWa)}\n\n`
              + '🔵 Assinar Pro (ilimitado):\n'
-             + `https://zazl.onrender.com/checkout/pro/month?whatsapp=${cleanWa}`;
+             + `https://zazl-backend.onrender.com/checkout/pro/month?whatsapp=${encodeURIComponent(cleanWa)}`;
       } else if (quota.plan === 'lite') {
         msg += '🔵 Faça upgrade para o Pro (mensagens ilimitadas):\n'
-             + `https://zazl.onrender.com/checkout/pro/month?whatsapp=${cleanWa}`;
+             + `https://zazl-backend.onrender.com/checkout/pro/month?whatsapp=${encodeURIComponent(cleanWa)}`;
       }
 
       res.type('text/xml');
