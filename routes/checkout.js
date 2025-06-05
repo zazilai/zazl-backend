@@ -6,10 +6,10 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Replace with your actual Price IDs from Stripe
 const PRICE_IDS = {
-  lite_month: 'price_1PDUq5GsUwOBHzqf3tu0tMC6',
-  lite_year: 'price_1PDUqTGsUwOBHzqfBRTxvd2q',
-  pro_month: 'price_1PDUqfGsUwOBHzqfFo2UBe1V',
-  pro_year: 'price_1PDUqsGsUwOBHzqfz2Vk0JKw'
+  lite_month: 'price_1RQZgMFdcDuC9qbDomkTCPnp',
+  lite_year: 'price_1RQZgrFdcDuC9qbD3xZIuMEF',
+  pro_month: 'price_1RQZhgFdcDuC9qbDI3KcYGRt',
+  pro_year: 'price_1RQZiZFdcDuC9qbDRhDt8dsm'
 };
 
 router.get('/checkout/:plan/:period', async (req, res) => {
