@@ -58,8 +58,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
+      const cleanWa = waNumber.replace(/^whatsapp:/, '').replace(/[^+\d]/g, ''); // final fix
       let msg = '⚠️ Você atingiu seu limite de mensagens hoje.\n\n';
-      const cleanWa = waNumber.replace(/^whatsapp:/, '');
 
       if (quota.plan === 'free' || quota.plan === 'trial') {
         msg += '🟢 Assinar Lite (15 msgs/dia):\n'
