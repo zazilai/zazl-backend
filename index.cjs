@@ -13,6 +13,7 @@ const dolarService = require('./services/dolar');
 const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
+const checkoutRoute = require('./routes/checkout');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -32,7 +33,6 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 // Checkout links (e.g. GET /checkout/:plan/:period?whatsapp=+15551234567)
-const checkoutRoute = require('./routes/checkout');
 app.use(checkoutRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
@@ -52,7 +52,14 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
+    const isFirstTime = !(await admin.firestore().collection('profiles').doc(waNumber).get()).exists;
     await profileSvc.load(db, waNumber);
+
+    if (isFirstTime) {
+      const welcome = `Prazer em te conhecer! Eu sou o Zazil, seu assistente aqui nos EUA 🇺🇸\n\nPosso ajudar com dicas para facilitar o seu dia a dia: inglês, cultura, burocracias, eventos e muito mais.\n\n👉 Ah, só um aviso: não entendo áudio. E respondo melhor se a pergunta vier completa em uma única mensagem.\n\n📎 Ao usar o Zazil, você concorda com nossos Termos e Política de Privacidade:\nworldofbrazil.ai/termos\nworldofbrazil.ai/privacidade`;
+      res.type('text/xml');
+      return res.send(`<Response><Message>${welcome}</Message></Response>`);
+    }
 
     // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);

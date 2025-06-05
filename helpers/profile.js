@@ -1,4 +1,3 @@
-// helpers/profile.js
 const admin = require('firebase-admin');
 
 const DEFAULT_PLAN = 'trial';
@@ -22,7 +21,7 @@ function addDays(date, days) {
 
 async function load(db, phone) {
   console.log('[profile.js] load() triggered for:', phone);
-  const ref = admin.firestore().collection('profiles').doc(phone);
+  const ref = db.collection('profiles').doc(phone);
   const snap = await ref.get();
 
   if (!snap.exists) {
@@ -35,10 +34,9 @@ async function load(db, phone) {
       usage: {},
       createdAt: now,
       trialStart: now,
-      planExpires: addDays(now, 7),
-      showWelcome: true
+      planExpires: addDays(now, 7)
     });
-    return { isNew: true };
+    return { wasNew: true };
   }
 
   const data = snap.data();
@@ -51,25 +49,19 @@ async function load(db, phone) {
     });
   }
 
-  if (data.showWelcome) {
-    return { isNew: true };
-  }
-
-  return { isNew: false };
+  return { wasNew: false };
 }
 
 async function updateUsage(db, phone, tokensUsed = 0) {
-  const ref = admin.firestore().collection('profiles').doc(phone);
+  const ref = db.collection('profiles').doc(phone);
   const today = getTodayKey();
-
   await ref.update({
-    [`usage.${today}`]: admin.firestore.FieldValue.increment(1),
-    showWelcome: false
+    [`usage.${today}`]: admin.firestore.FieldValue.increment(1)
   });
 }
 
 async function getQuotaStatus(db, phone) {
-  const ref = admin.firestore().collection('profiles').doc(phone);
+  const ref = db.collection('profiles').doc(phone);
   const snap = await ref.get();
   if (!snap.exists) return { allowed: false, plan: 'free', used: 0 };
 
