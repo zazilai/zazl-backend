@@ -34,8 +34,8 @@ router.get('/checkout/:plan/:period', async (req, res) => {
         whatsapp_number: wa,
         plan: `${plan}_${period}`
       },
-      success_url: 'https://worldofbrazil.ai/sucesso?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'https://worldofbrazil.ai/cancelamento'
+      success_url: 'https://worldofbrazil.ai',
+      cancel_url: 'https://worldofbrazil.ai'
     });
 
     res.redirect(303, session.url);
