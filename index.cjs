@@ -32,7 +32,7 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWeb
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Checkout and management routes
+// ✅ Apply routes after `app` is defined
 app.use(checkoutRoute);
 app.use(manageRoute);
 
