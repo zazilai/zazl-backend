@@ -14,7 +14,6 @@ const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
-app.use(checkoutRoute);
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -29,9 +28,12 @@ const app = express();
 // Stripe webhook: must use raw body before json parsers
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
-// Apply body parsers for other routes
+// Apply body parsers for all remaining routes
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
+// Checkout links (e.g. GET /checkout/:plan/:period?wa=number)
+app.use(checkoutRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
