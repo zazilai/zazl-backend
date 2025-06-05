@@ -13,7 +13,6 @@ const dolarService = require('./services/dolar');
 const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
-const checkoutRoute = require('./routes/checkout');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -32,7 +31,8 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWeb
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Checkout links (e.g. GET /checkout/:plan/:period?wa=number)
+// Checkout links (e.g. GET /checkout/:plan/:period?whatsapp=+15551234567)
+const checkoutRoute = require('./routes/checkout');
 app.use(checkoutRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
