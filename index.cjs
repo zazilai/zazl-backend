@@ -1,3 +1,4 @@
+// index.cjs
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -63,12 +64,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
       if (quota.plan === 'free' || quota.plan === 'trial') {
         msg += '🟢 Assinar Lite (15 msgs/dia):\n'
-             + `https://zazl.onrender.com/checkout/lite/month?wa=${cleanWa}\n\n`
+             + `https://zazl.onrender.com/checkout/lite/month?whatsapp=${cleanWa}\n\n`
              + '🔵 Assinar Pro (ilimitado):\n'
-             + `https://zazl.onrender.com/checkout/pro/month?wa=${cleanWa}`;
+             + `https://zazl.onrender.com/checkout/pro/month?whatsapp=${cleanWa}`;
       } else if (quota.plan === 'lite') {
         msg += '🔵 Faça upgrade para o Pro (mensagens ilimitadas):\n'
-             + `https://zazl.onrender.com/checkout/pro/month?wa=${cleanWa}`;
+             + `https://zazl.onrender.com/checkout/pro/month?whatsapp=${cleanWa}`;
       }
 
       res.type('text/xml');
