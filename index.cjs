@@ -14,7 +14,6 @@ const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
-const manageRoute = require('./routes/manage');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -26,16 +25,15 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 
-// Stripe webhook (raw body first)
+// Stripe webhook: must use raw body before json parsers
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
-// Body parsers
+// Apply body parsers for all remaining routes
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Public routes
+// Checkout links (e.g. GET /checkout/:plan/:period?whatsapp=+15551234567)
 app.use(checkoutRoute);
-app.use(manageRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
@@ -56,12 +54,26 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   try {
     await profileSvc.load(db, waNumber);
 
+    // Detect first-time user
+    const profileRef = db.collection('profiles').doc(waNumber);
+    const snap = await profileRef.get();
+    const data = snap.data();
+    const now = Date.now();
+    const created = data?.createdAt?.toDate?.().getTime?.();
+    const justCreated = created && now - created < 5000;
+
+    if (justCreated) {
+      const welcome = replyHelper.welcome();
+      res.type('text/xml');
+      return res.send(`<Response><Message>${welcome.content}</Message></Response>`);
+    }
+
     // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const msg = quota.plan === 'free'
         ? '⚠️ Esta funcionalidade do Zazil está disponível apenas para assinantes do plano Lite ou Pro. Assine em: worldofbrazil.ai'
-        : replyHelper.upgrade(); // Proposta de upgrade com link
+        : '⚠️ Você atingiu seu limite de mensagens hoje. Tente novamente amanhã ou faça upgrade para Pro ilimitado em worldofbrazil.ai';
 
       res.type('text/xml');
       return res.send(`<Response><Message>${msg}</Message></Response>`);
@@ -78,16 +90,20 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.events(events);
         break;
       }
+
       case 'FX': {
         const rate = await dolarService.getRate();
+        console.log('[FX] rate fetched:', rate);
         replyObj = replyHelper.dolar(rate);
         break;
       }
+
       case 'NEWS': {
         const digest = await newsService.getDigest();
         replyObj = replyHelper.news(digest);
         break;
       }
+
       default: {
         const gpt = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
@@ -109,7 +125,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         });
 
         const docId = docRef.id;
-
         const MAX_LEN = 1600;
         if (content.length > MAX_LEN) {
           const cut = content.lastIndexOf('\n', MAX_LEN);
@@ -124,7 +139,13 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    const safeContent = replyObj?.content?.trim() || 'Desculpe, não consegui entender.';
+    let safeContent = 'Desculpe, não consegui entender.';
+    if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
+      safeContent = replyObj.content;
+    } else {
+      console.warn('[Zazil] No replyObj or content found — using fallback.');
+    }
+
     res.type('text/xml');
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
