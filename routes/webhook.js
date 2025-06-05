@@ -7,6 +7,7 @@ const admin = require('firebase-admin');
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+// Important: express.raw() must be used before any bodyParser middleware
 router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -22,7 +23,7 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
     const session = event.data.object;
 
     const whatsappNumber = session.metadata?.whatsapp_number;
-    const planId = session.metadata?.plan || ''; // e.g., pro_month, lite_year
+    const planId = session.metadata?.plan || '';
 
     if (!whatsappNumber || !planId) {
       console.error('[Stripe webhook] Missing metadata (whatsapp_number or plan)');
