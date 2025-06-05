@@ -4,43 +4,44 @@ const router = express.Router();
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-const PRICES = {
-  lite_month: 'price_1RQZgMFdcDuC9qbDomkTCPnp',
-  lite_year:  'price_1RQZgrFdcDuC9qbD3xZtUMEF',
-  pro_month:  'price_1RQZhgFdcDuC9qbDI3KcYGRt',
-  pro_year:   'price_1RQZiZFdcDuC9qbDRhDt8dsm'
+// Replace with your actual Price IDs from Stripe
+const PRICE_IDS = {
+  lite_month: 'price_1PDUq5GsUwOBHzqf3tu0tMC6',
+  lite_year: 'price_1PDUqTGsUwOBHzqfBRTxvd2q',
+  pro_month: 'price_1PDUqfGsUwOBHzqfFo2UBe1V',
+  pro_year: 'price_1PDUqsGsUwOBHzqfz2Vk0JKw'
 };
 
-// Access via: /checkout/lite/month?whatsapp=+15551234567
 router.get('/checkout/:plan/:period', async (req, res) => {
   const { plan, period } = req.params;
-  const whatsapp = req.query.whatsapp;
+  const wa = req.query.whatsapp || req.query.wa || '';
 
-  if (!whatsapp) {
-    return res.status(400).send('Missing WhatsApp number');
+  if (!wa || !['lite', 'pro'].includes(plan) || !['month', 'year'].includes(period)) {
+    return res.status(400).send('❌ Invalid request. Missing WhatsApp number or incorrect plan/period.');
   }
 
-  const priceId = PRICES[`${plan}_${period}`];
+  const priceId = PRICE_IDS[`${plan}_${period}`];
   if (!priceId) {
-    return res.status(400).send('Invalid plan or period');
+    return res.status(400).send('❌ Invalid plan or period');
   }
 
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
+      payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
       metadata: {
-        whatsapp_number: whatsapp,
+        whatsapp_number: wa,
         plan: `${plan}_${period}`
       },
-      success_url: 'https://worldofbrazil.ai',
-      cancel_url: 'https://worldofbrazil.ai'
+      success_url: 'https://worldofbrazil.ai/sucesso?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: 'https://worldofbrazil.ai/cancelamento'
     });
 
     res.redirect(303, session.url);
   } catch (err) {
-    console.error('🔥 Stripe Checkout Error:', err.message);
-    res.status(500).send('Internal Server Error');
+    console.error('[checkout] Stripe error:', err.message);
+    res.status(500).send('❌ Failed to create checkout session.');
   }
 });
 
