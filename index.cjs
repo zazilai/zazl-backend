@@ -26,8 +26,10 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
+// ── Health check ─────────────────────
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
+// ── FX API endpoint ──────────────────
 app.get('/api/dolar', async (req, res) => {
   try {
     const rateObj = await dolarService.getRate();
@@ -37,21 +39,36 @@ app.get('/api/dolar', async (req, res) => {
   }
 });
 
+// ── WhatsApp Webhook ─────────────────
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
-    await profileSvc.load(db, waNumber);
+    const profile = await profileSvc.load(db, waNumber);
+
+    // Welcome message for first-time users
+    if (profile?.isNew) {
+      const welcome = `👋 Prazer em conhecer! Eu sou o *Zazil*, seu assistente cultural brasileiro.
+
+🧠 Respondo melhor quando você escreve sua pergunta completa em uma única mensagem (sem áudios!).
+
+💬 Posso ajudar com inglês, cultura americana, burocracias, eventos, e outras dicas do dia-a-dia.
+
+🔒 Ao usar o Zazil, você aceita nossos [termos](https://worldofbrazil.ai/termos) e [privacidade](https://worldofbrazil.ai/privacidade).
+
+Manda aí sua primeira pergunta! 😉`;
+      res.type('text/xml');
+      return res.send(`<Response><Message>${welcome}</Message></Response>`);
+    }
 
     // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const msg = quota.plan === 'free'
-        ? '⚠️ Esta funcionalidade do Zazil está disponível apenas para assinantes do plano Lite ou Pro.'
-        : '⚠️ Você atingiu seu limite de mensagens hoje. Tente novamente amanhã ou faça upgrade para Pro ilimitado.';
-
+        ? '⚠️ Esta funcionalidade do Zazil está disponível apenas para assinantes do plano Lite ou Pro. Assine aqui: https://worldofbrazil.ai/wobplus'
+        : '⚠️ Você atingiu seu limite de mensagens hoje. Tente amanhã ou vá para o plano Pro ilimitado: https://worldofbrazil.ai/wobplus';
       res.type('text/xml');
       return res.send(`<Response><Message>${msg}</Message></Response>`);
     }
@@ -115,7 +132,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // Update usage only after successful processing
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
     let safeContent = 'Desculpe, não consegui entender.';
@@ -134,5 +150,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   }
 });
 
+// ── Stripe webhook endpoint ──────────
+app.use(stripeWebhook);
+
+// ── Start App ────────────────────────
 const PORT = process.env.PORT || 3000;
-app.use(stripeWebhook); app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
