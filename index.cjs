@@ -24,8 +24,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 
-// Stripe webhook must be mounted BEFORE bodyParser
-app.use('/webhook/stripe', stripeWebhook);
+// Stripe webhook: must use raw body before json parsers
+app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
 // Apply body parsers for other routes
 app.use(bodyParser.urlencoded({ extended: false }));
