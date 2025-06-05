@@ -13,6 +13,8 @@ const dolarService = require('./services/dolar');
 const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
+const checkoutRoute = require('./routes/checkout');
+app.use(checkoutRoute);
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
