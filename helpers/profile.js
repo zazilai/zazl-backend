@@ -35,9 +35,10 @@ async function load(db, phone) {
       usage: {},
       createdAt: now,
       trialStart: now,
-      planExpires: addDays(now, 7)
+      planExpires: addDays(now, 7),
+      showWelcome: true
     });
-    return;
+    return { isNew: true };
   }
 
   const data = snap.data();
@@ -49,13 +50,21 @@ async function load(db, phone) {
       [`usage.${today}`]: 0
     });
   }
+
+  if (data.showWelcome) {
+    return { isNew: true };
+  }
+
+  return { isNew: false };
 }
 
 async function updateUsage(db, phone, tokensUsed = 0) {
   const ref = admin.firestore().collection('profiles').doc(phone);
   const today = getTodayKey();
+
   await ref.update({
-    [`usage.${today}`]: admin.firestore.FieldValue.increment(1)
+    [`usage.${today}`]: admin.firestore.FieldValue.increment(1),
+    showWelcome: false
   });
 }
 
