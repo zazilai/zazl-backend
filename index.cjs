@@ -1,4 +1,3 @@
-// index.cjs
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -14,6 +13,7 @@ const newsService = require('./services/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
+const manageRoute = require('./routes/manage');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -32,8 +32,9 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWeb
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Checkout links (e.g. GET /checkout/:plan/:period?whatsapp=+15551234567)
+// Checkout and management routes
 app.use(checkoutRoute);
+app.use(manageRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
@@ -54,26 +55,20 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   try {
     await profileSvc.load(db, waNumber);
 
-    // Detect first-time user
-    const profileRef = db.collection('profiles').doc(waNumber);
-    const snap = await profileRef.get();
-    const data = snap.data();
-    const now = Date.now();
-    const created = data?.createdAt?.toDate?.().getTime?.();
-    const justCreated = created && now - created < 5000;
-
-    if (justCreated) {
-      const welcome = replyHelper.welcome();
-      res.type('text/xml');
-      return res.send(`<Response><Message>${welcome.content}</Message></Response>`);
-    }
-
     // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
-      const msg = quota.plan === 'free'
-        ? '⚠️ Esta funcionalidade do Zazil está disponível apenas para assinantes do plano Lite ou Pro. Assine em: worldofbrazil.ai'
-        : '⚠️ Você atingiu seu limite de mensagens hoje. Tente novamente amanhã ou faça upgrade para Pro ilimitado em worldofbrazil.ai';
+      let msg = '⚠️ Você atingiu seu limite de mensagens hoje.\n\n';
+
+      if (quota.plan === 'free' || quota.plan === 'trial') {
+        msg += '🟢 Assinar Lite (15 msgs/dia):\n'
+             + `https://zazl.onrender.com/checkout/lite/month?wa=${encodeURIComponent(waNumber)}\n\n`
+             + '🔵 Assinar Pro (ilimitado):\n'
+             + `https://zazl.onrender.com/checkout/pro/month?wa=${encodeURIComponent(waNumber)}`;
+      } else if (quota.plan === 'lite') {
+        msg += '🔵 Faça upgrade para o Pro (mensagens ilimitadas):\n'
+             + `https://zazl.onrender.com/checkout/pro/month?wa=${encodeURIComponent(waNumber)}`;
+      }
 
       res.type('text/xml');
       return res.send(`<Response><Message>${msg}</Message></Response>`);
@@ -93,7 +88,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
       case 'FX': {
         const rate = await dolarService.getRate();
-        console.log('[FX] rate fetched:', rate);
         replyObj = replyHelper.dolar(rate);
         break;
       }
@@ -125,6 +119,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         });
 
         const docId = docRef.id;
+
         const MAX_LEN = 1600;
         if (content.length > MAX_LEN) {
           const cut = content.lastIndexOf('\n', MAX_LEN);
