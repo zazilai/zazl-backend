@@ -32,7 +32,7 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWeb
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// ✅ Apply routes after `app` is defined
+// Checkout and management routes
 app.use(checkoutRoute);
 app.use(manageRoute);
 
@@ -50,6 +50,7 @@ app.get('/api/dolar', async (req, res) => {
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
+  const cleanWa = waNumber.replace(/^whatsapp:/, '');
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
@@ -62,12 +63,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
       if (quota.plan === 'free' || quota.plan === 'trial') {
         msg += '🟢 Assinar Lite (15 msgs/dia):\n'
-             + `https://zazl.onrender.com/checkout/lite/month?wa=${encodeURIComponent(waNumber)}\n\n`
+             + `https://zazl.onrender.com/checkout/lite/month?wa=${encodeURIComponent(cleanWa)}\n\n`
              + '🔵 Assinar Pro (ilimitado):\n'
-             + `https://zazl.onrender.com/checkout/pro/month?wa=${encodeURIComponent(waNumber)}`;
+             + `https://zazl.onrender.com/checkout/pro/month?wa=${encodeURIComponent(cleanWa)}`;
       } else if (quota.plan === 'lite') {
         msg += '🔵 Faça upgrade para o Pro (mensagens ilimitadas):\n'
-             + `https://zazl.onrender.com/checkout/pro/month?wa=${encodeURIComponent(waNumber)}`;
+             + `https://zazl.onrender.com/checkout/pro/month?wa=${encodeURIComponent(cleanWa)}`;
       }
 
       res.type('text/xml');
