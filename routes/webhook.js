@@ -23,10 +23,11 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
 
     const whatsappNumber = session.metadata?.whatsapp_number;
     const planId = session.metadata?.plan || ''; // e.g., pro_month, lite_year
+    const customerId = session.customer;
 
-    if (!whatsappNumber || !planId) {
-      console.error('[Stripe webhook] Missing metadata (whatsapp_number or plan)');
-      return res.status(400).send('Missing required metadata');
+    if (!whatsappNumber || !planId || !customerId) {
+      console.error('[Stripe webhook] Missing metadata or customer');
+      return res.status(400).send('Missing required metadata or customer');
     }
 
     const profileId = `whatsapp:+${whatsappNumber.replace(/\D/g, '')}`;
@@ -46,12 +47,12 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
           plan,
           planExpires: expiresAt,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          customerId: session.customer // ✅ Save customer ID for cancelation portal
+          customerId // ✅ This is the key field used by manage.js
         },
         { merge: true }
       );
 
-      console.log(`✅ Updated ${profileId} → Plan: ${plan}, Expires: ${expiresAt.toISOString()}`);
+      console.log(`✅ Updated ${profileId} → Plan: ${plan}, Customer: ${customerId}, Expires: ${expiresAt.toISOString()}`);
     } catch (err) {
       console.error('[Stripe webhook] Firestore update failed:', err.message);
     }
