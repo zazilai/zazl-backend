@@ -46,6 +46,7 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
           plan,
           planExpires: expiresAt,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          customerId: session.customer // ✅ Save customer ID for cancelation portal
         },
         { merge: true }
       );
