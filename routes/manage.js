@@ -1,33 +1,33 @@
-// routes/manage.js
 const express = require('express');
 const router = express.Router();
+const admin = require('firebase-admin');
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-const portalUrl = 'https://billing.stripe.com/p/login'; // fallback if no session
+// GET /gerenciar?wa=+15551234567
+router.get('/gerenciar', async (req, res) => {
+  const raw = req.query.wa || '';
+  const clean = raw.replace(/\D/g, '');
+  if (!clean) return res.status(400).send('Número inválido.');
 
-router.get('/manage', async (req, res) => {
-  const whatsapp = req.query.wa?.replace(/[^\d+]/g, '');
-  if (!whatsapp) return res.status(400).send('Missing WhatsApp number');
+  const profileId = `whatsapp:+${clean}`;
+  const db = admin.firestore();
+  const snap = await db.collection('profiles').doc(profileId).get();
+  if (!snap.exists) return res.status(404).send('Usuário não encontrado.');
+
+  const data = snap.data();
+  const customerId = data.customerId;
+  if (!customerId) return res.status(404).send('Nenhum plano ativo vinculado a este número.');
 
   try {
-    // Look up customer by phone number metadata
-    const customers = await stripe.customers.search({
-      query: `metadata[\"whatsapp_number\"]:\"${whatsapp}\"`,
-    });
-
-    const customer = customers.data?.[0];
-    if (!customer) return res.redirect(portalUrl);
-
     const session = await stripe.billingPortal.sessions.create({
-      customer: customer.id,
-      return_url: 'https://worldofbrazil.ai',
+      customer: customerId,
+      return_url: 'https://zazil.ai',
     });
-
-    res.redirect(session.url);
+    return res.redirect(session.url);
   } catch (err) {
-    console.error('[Manage portal] Error:', err.message);
-    res.redirect(portalUrl);
+    console.error('[Stripe cancel portal] error:', err.message);
+    return res.status(500).send('Erro interno. Tente novamente.');
   }
 });
 
