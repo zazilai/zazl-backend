@@ -4,27 +4,30 @@ const router = express.Router();
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Customer portal redirect
+const portalUrl = 'https://billing.stripe.com/p/login'; // fallback if no session
+
 router.get('/manage', async (req, res) => {
-  const wa = req.query.wa;
-  if (!wa) return res.status(400).send('Missing ?wa parameter');
+  const whatsapp = req.query.wa?.replace(/[^\d+]/g, '');
+  if (!whatsapp) return res.status(400).send('Missing WhatsApp number');
 
   try {
-    // Find customer by metadata
-    const customers = await stripe.customers.list({ limit: 100 });
-    const customer = customers.data.find(c => c.metadata?.whatsapp_number === wa);
+    // Look up customer by phone number metadata
+    const customers = await stripe.customers.search({
+      query: `metadata[\"whatsapp_number\"]:\"${whatsapp}\"`,
+    });
 
-    if (!customer) return res.status(404).send('Customer not found');
+    const customer = customers.data?.[0];
+    if (!customer) return res.redirect(portalUrl);
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customer.id,
-      return_url: 'https://worldofbrazil.ai'
+      return_url: 'https://worldofbrazil.ai',
     });
 
-    return res.redirect(session.url);
+    res.redirect(session.url);
   } catch (err) {
-    console.error('[manage.js] Failed to create portal session:', err.message);
-    return res.status(500).send('Internal error');
+    console.error('[Manage portal] Error:', err.message);
+    res.redirect(portalUrl);
   }
 });
 
