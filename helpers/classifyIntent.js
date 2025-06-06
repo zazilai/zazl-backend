@@ -5,20 +5,21 @@ const SYSTEM_PROMPT = `
 You are an intent classifier. Classify the user's message into one of the following intents:
 
 - fx: if it's asking about currency, dollar exchange rate, or financial value
-- event: if it's asking what to do, events, shows, or local plans
+- event: if it's asking what to do, events, shows, games, or local plans
 - news: if it's asking what's happening in the world, Brazil, or general updates
+- cancel: if the user is trying to cancel, unsubscribe, or end their Zazil plan
 - generic: if it's anything else, like a question, translation, joke, or random curiosity
 `;
 
 const functions = [{
   name: 'classify_intent',
-  description: 'Classifies user input into one of four supported intents.',
+  description: 'Classifies user input into one of five supported intents.',
   parameters: {
     type: 'object',
     properties: {
       intent: {
         type: 'string',
-        enum: ['fx', 'event', 'news', 'generic'],
+        enum: ['fx', 'event', 'news', 'cancel', 'generic'],
         description: 'The type of user intent'
       }
     },
