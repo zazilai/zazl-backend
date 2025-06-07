@@ -9,7 +9,7 @@ const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const groovooService = require('./services/groovoo');
 const dolarService = require('./services/dolar');
-const newsService = require('./services/news');
+const newsService = require('./helpers/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
@@ -100,7 +100,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
 
       case 'NEWS': {
-        const digest = await newsService.getDigest();
+        const digest = await newsService.getDigest(incoming); // ✅ Aceita prompt
         replyObj = replyHelper.news(digest);
         break;
       }

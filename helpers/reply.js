@@ -7,7 +7,12 @@ function generic(content) {
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 *Cotação do Dólar Hoje:*\n\nUS$ 1 = R$ ${rate.buy}\n\nSe estiver pensando em enviar dinheiro para o Brasil, use a Remitly:\n👉 https://remit.ly/1bh2ujzp`
+    content: `💵 *Cotação do Dólar Hoje:*
+
+US$ 1 = R$ ${rate.buy}
+
+Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
+👉 https://remit.ly/1bh2ujzp`
   };
 }
 
@@ -35,9 +40,18 @@ function events(list = []) {
 }
 
 function news(digest = '') {
+  if (!digest.trim()) {
+    return {
+      type: 'text',
+      content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
+    };
+  }
+
   return {
     type: 'text',
-    content: `🗞️ *Resumo de Notícias:*\n\n${digest}`
+    content: `🗞️ *Resumo de Notícias:*
+
+${digest}`
   };
 }
 
@@ -45,7 +59,22 @@ function welcome(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
-    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷\n\nVocê está no plano *Lite grátis por 7 dias* — pode me mandar até 15 mensagens por dia!\n\n💡 Se quiser mais liberdade:\n🟢 Assinar Lite (15 msgs/dia):\nhttps://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}\n\n🔵 Assinar Pro (mensagens ilimitadas):\nhttps://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}\n\n❗ *Importante:*\n- Não envio nem entendo áudios;\n- Prefiro que mande sua pergunta completa em uma única mensagem.\n\nAo usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
+    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
+
+Você está no plano *Lite grátis por 7 dias* — pode me mandar até 15 mensagens por dia!
+
+💡 Se quiser mais liberdade:
+🟢 Assinar Lite (15 msgs/dia):
+https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+
+🔵 Assinar Pro (mensagens ilimitadas):
+https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+
+❗ *Importante:*
+- Não envio nem entendo áudios;
+- Prefiro que mande sua pergunta completa em uma única mensagem.
+
+Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
   };
 }
 
@@ -53,14 +82,18 @@ function upgrade(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
-    content: `🔒 Você atingiu seu limite diário de mensagens.\n\nAssine o plano *Pro ilimitado* para continuar usando o Zazil sem limites:\n👉 https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}`
+    content: `🔒 Você atingiu seu limite diário de mensagens.
+
+Assine o plano *Pro ilimitado* para continuar usando o Zazil sem limites:
+👉 https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}`
   };
 }
 
 function cancel() {
   return {
     type: 'text',
-    content: `❌ Para gerenciar ou cancelar sua assinatura, acesse:\nhttps://worldofbrazil.ai/gerenciar`
+    content: `❌ Para gerenciar ou cancelar sua assinatura, acesse:
+https://worldofbrazil.ai/gerenciar`
   };
 }
 
@@ -75,19 +108,15 @@ function amazon(items = []) {
   const top = items.map(i => {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
-    let url = i.url || '#';
-
-    // Corrigir links com .com.br para .com
-    if (url.includes('.com.br')) {
-      url = url.replace('.com.br', '.com');
-    }
-
+    const url = i.url;
     return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
   }).join('\n\n');
 
   return {
     type: 'text',
-    content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
+    content: `✨ *Produtos encontrados na Amazon:*
+
+${top}`
   };
 }
 
