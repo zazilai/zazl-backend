@@ -1,4 +1,3 @@
-// routes/webhook.js
 const express = require('express');
 const router = express.Router();
 const Stripe = require('stripe');
@@ -45,9 +44,9 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
       await ref.set(
         {
           plan,
+          customerId,
           planExpires: expiresAt,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          customerId // ✅ This is the key field used by manage.js
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
         },
         { merge: true }
       );
