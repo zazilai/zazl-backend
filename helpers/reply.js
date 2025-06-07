@@ -57,6 +57,27 @@ function cancel() {
   };
 }
 
+function amazon(items = []) {
+  if (!items.length) {
+    return {
+      type: 'text',
+      content: '🔎 Não encontrei produtos relevantes no momento. Tente buscar de outra forma ou com palavras mais específicas!'
+    };
+  }
+
+  const top = items.slice(0, 3).map(i => {
+    const title = i.ItemInfo?.Title?.DisplayValue;
+    const price = i.Offers?.Listings?.[0]?.Price?.DisplayAmount;
+    const url = i.DetailPageURL;
+    return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
+  }).join('\n\n');
+
+  return {
+    type: 'text',
+    content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
+  };
+}
+
 module.exports = {
   generic,
   dolar,
@@ -64,5 +85,6 @@ module.exports = {
   news,
   welcome,
   upgrade,
-  cancel
+  cancel,
+  amazon
 };

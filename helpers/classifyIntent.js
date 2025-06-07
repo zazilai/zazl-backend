@@ -8,6 +8,7 @@ Você é um classificador de intenção. Classifique a mensagem do usuário em u
 - fx: se estiver perguntando sobre câmbio, dólar, valor financeiro, ou comparação com real
 - event: se estiver perguntando o que fazer, eventos, jogos, shows, festas ou planos locais
 - news: se estiver perguntando o que está acontecendo no mundo, no Brasil ou atualidades
+- amazon: se estiver perguntando onde comprar, o preço de produtos, recomendações, ou buscando coisas específicas para comprar (como na Amazon)
 - cancel: se estiver tentando cancelar, sair ou encerrar o plano do Zazil
 - generic: se for qualquer outra coisa, como perguntas gerais, tradução, conselhos, curiosidades ou piadas
 `;
@@ -20,7 +21,7 @@ const functions = [{
     properties: {
       intent: {
         type: 'string',
-        enum: ['fx', 'event', 'news', 'cancel', 'generic'],
+        enum: ['fx', 'event', 'news', 'cancel','amazon', 'generic'],
         description: 'A intenção principal da mensagem do usuário'
       }
     },
