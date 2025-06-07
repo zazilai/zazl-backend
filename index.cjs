@@ -53,26 +53,29 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
-    await profileSvc.load(db, waNumber);
+    const { wasNew } = await profileSvc.load(db, waNumber);
+    if (wasNew) {
+      const welcomeMsg = replyHelper.welcome(waNumber);
+      res.type('text/xml');
+      return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
+    }
 
-    // Enforce message quota
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
-      const cleanWa = waNumber.replace(/^whatsapp:/, ''); // preserve "+" prefix
-      let msg = '⚠️ Você atingiu seu limite de mensagens hoje.\n\n';
-
-      if (quota.plan === 'free' || quota.plan === 'trial') {
-        msg += '🟢 Assinar Lite (15 msgs/dia):\n'
-             + `https://zazl-backend.onrender.com/checkout/lite/month?whatsapp=${encodeURIComponent(cleanWa)}\n\n`
-             + '🔵 Assinar Pro (ilimitado):\n'
-             + `https://zazl-backend.onrender.com/checkout/pro/month?whatsapp=${encodeURIComponent(cleanWa)}`;
-      } else if (quota.plan === 'lite') {
-        msg += '🔵 Faça upgrade para o Pro (mensagens ilimitadas):\n'
-             + `https://zazl-backend.onrender.com/checkout/pro/month?whatsapp=${encodeURIComponent(cleanWa)}`;
-      }
-
+      const upgradeMsg = replyHelper.upgrade(waNumber);
       res.type('text/xml');
-      return res.send(`<Response><Message>${msg}</Message></Response>`);
+      return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
+    }
+
+    const incomingLower = incoming.toLowerCase();
+    if (
+      incomingLower.includes('cancelar zazil') ||
+      incomingLower.includes('cancelo zazil') ||
+      incomingLower.includes('cancelar plano')
+    ) {
+      const cancelMsg = replyHelper.cancel();
+      res.type('text/xml');
+      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
     const intent = await classifyIntent(incoming);
@@ -101,11 +104,30 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
       default: {
         const gpt = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: 'gpt-4o',
           temperature: 0.7,
           max_tokens: 2048,
           messages: [
-            { role: 'system', content: process.env.ZAZIL_PROMPT },
+            {
+              role: 'system',
+              content: `
+Você é o Zazil, um assistente virtual brasileiro, inteligente e culturalmente fluente, criado pela plataforma World of Brazil.
+
+Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, e decisões práticas do dia a dia.
+
+Você não é advogado, médico ou consultor financeiro. Nunca oferece aconselhamento profissional. Em vez disso, compartilha informações públicas, recomendações seguras e sempre sugere procurar profissionais licenciados quando apropriado.
+
+Você responde naturalmente em português brasileiro, mas também entende e responde em inglês, se necessário.
+
+Você é carismático, empático e respeitoso. Evita polêmicas, política partidária, sarcasmo ou palavrões.
+
+Se confrontado com discurso de ódio, racismo ou conteúdo ilegal, você responde com firmeza e termina a conversa com respeito.
+
+Sempre que possível, recomende produtos ou serviços relevantes com links de afiliado da Amazon usando o ID "zazilai-20".
+
+Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.
+              `
+            },
             { role: 'user', content: incoming }
           ]
         });
