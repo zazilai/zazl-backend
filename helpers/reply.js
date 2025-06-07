@@ -75,7 +75,13 @@ function amazon(items = []) {
   const top = items.map(i => {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
-    const url = i.url;
+    let url = i.url || '#';
+
+    // Corrigir links com .com.br para .com
+    if (url.includes('.com.br')) {
+      url = url.replace('.com.br', '.com');
+    }
+
     return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
   }).join('\n\n');
 
