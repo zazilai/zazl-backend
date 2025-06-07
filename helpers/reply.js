@@ -7,7 +7,7 @@ function generic(content) {
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 *Cotação do Dólar Hoje:*\n\nUS$ 1 = R$ ${rate.buy}\nFonte: Remessa Online`
+    content: `💵 *Cotação do Dólar Hoje:*\n\nUS$ 1 = R$ ${rate.buy}\n\n💡 Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:\nhttps://remit.ly/1bh2ujzp`
   };
 }
 
