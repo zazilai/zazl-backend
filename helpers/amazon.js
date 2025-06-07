@@ -38,4 +38,4 @@ async function searchAmazonProducts(query) {
 
   const payloadJson = JSON.stringify(payload);
   const now = new Date();
-  const amzDate = now.toISOString().replace(/[:\-]|
+ const amzDate = now.toISOString().replace(/[:\-]|\..*/g, '');
