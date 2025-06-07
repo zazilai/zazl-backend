@@ -36,7 +36,7 @@ async function load(db, phone) {
       trialStart: now,
       planExpires: addDays(now, 7)
     });
-    return { wasNew: true };
+    return true; // wasNew = true
   }
 
   const data = snap.data();
@@ -49,7 +49,7 @@ async function load(db, phone) {
     });
   }
 
-  return { wasNew: false };
+  return false; // wasNew = false
 }
 
 async function updateUsage(db, phone, tokensUsed = 0) {
