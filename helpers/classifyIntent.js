@@ -1,4 +1,3 @@
-// helpers/classifyIntent.js
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -8,7 +7,7 @@ Você é um classificador de intenção. Classifique a mensagem do usuário em u
 - fx: se estiver perguntando sobre câmbio, dólar, valor financeiro, ou comparação com real
 - event: se estiver perguntando o que fazer, eventos, jogos, shows, festas ou planos locais
 - news: se estiver perguntando o que está acontecendo no mundo, no Brasil ou atualidades
-- amazon: se estiver perguntando onde comprar, o preço de produtos, recomendações, ou buscando coisas específicas para comprar (como na Amazon)
+- amazon: se estiver perguntando onde comprar, quanto custa, ou pedindo recomendações de produtos (raquete, panela, tênis, Alexa, etc)
 - cancel: se estiver tentando cancelar, sair ou encerrar o plano do Zazil
 - generic: se for qualquer outra coisa, como perguntas gerais, tradução, conselhos, curiosidades ou piadas
 `;
@@ -21,7 +20,7 @@ const functions = [{
     properties: {
       intent: {
         type: 'string',
-        enum: ['fx', 'event', 'news', 'cancel','amazon', 'generic'],
+        enum: ['fx', 'event', 'news', 'cancel', 'amazon', 'generic'],
         description: 'A intenção principal da mensagem do usuário'
       }
     },
@@ -42,7 +41,7 @@ async function classifyIntent(userText) {
   });
 
   const args = response.choices[0].message.function_call.arguments;
-  return JSON.parse(args).intent.toUpperCase(); // e.g. 'FX', 'EVENT', etc.
+  return JSON.parse(args).intent.toUpperCase(); // returns 'FX', 'AMAZON', etc.
 }
 
 module.exports = classifyIntent;
