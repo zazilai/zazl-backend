@@ -1,41 +1,40 @@
-// helpers/news.js
-const axios = require('axios');
+const fetch = require('node-fetch');
 
-const API_KEY = process.env.BING_NEWS_API_KEY;
-const API_HOST = 'bing-news-search1.p.rapidapi.com';
-const API_URL = 'https://bing-news-search1.p.rapidapi.com/news/search';
+const API_KEY = process.env.RAPIDAPI_KEY;
+const HOST = 'bing-news-search1.p.rapidapi.com';
+const BASE_URL = `https://${HOST}/news/search`;
 
 async function getDigest(query = '') {
   try {
-    const response = await axios.get(API_URL, {
-      params: {
-        q: query || 'Brazil USA immigration',
-        count: 5,
-        freshness: 'Day',
-        textFormat: 'Raw',
-        safeSearch: 'Moderate'
-      },
+    const q = query.trim() || 'Brasil EUA imigração cultura';
+    const response = await fetch(`${BASE_URL}?q=${encodeURIComponent(q)}&count=5&freshness=Day&textFormat=Raw&safeSearch=Off`, {
+      method: 'GET',
       headers: {
         'X-BingApis-SDK': 'true',
-        'X-RapidAPI-Key': API_KEY,
-        'X-RapidAPI-Host': API_HOST
+        'X-RapidAPI-Host': HOST,
+        'X-RapidAPI-Key': API_KEY
       }
     });
 
-    const articles = response.data.value;
-    if (!articles || !articles.length) return '📰 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
+    if (!response.ok) {
+      console.error('[NewsAPI] HTTP error', response.status);
+      return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
+    }
 
-    const digest = articles.map(article => {
-      const title = article.name || 'Notícia';
-      const source = article.provider?.[0]?.name || '';
-      const url = article.url || '';
-      return `🗞️ *${title}* (${source})\n🔗 ${url}`;
-    }).join('\n\n');
+    const data = await response.json();
+    const articles = data.value || [];
 
-    return digest;
+    if (!articles.length) {
+      return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
+    }
+
+    const summary = articles.map(a => `📰 *${a.name}*
+${a.description}
+🔗 ${a.url}`).join('\n\n');
+    return summary;
   } catch (err) {
-    console.error('[news.js] erro ao buscar notícias:', err.message);
-    return '📰 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
+    console.error('[NewsAPI] fetch error', err);
+    return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
   }
 }
 
