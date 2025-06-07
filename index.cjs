@@ -14,6 +14,7 @@ const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
+const viewRoute = require('./routes/view');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -35,6 +36,7 @@ app.use(bodyParser.json());
 // Checkout and management routes
 app.use(checkoutRoute);
 app.use(manageRoute);
+app.use(viewRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
