@@ -1,26 +1,27 @@
+// helpers/classifyIntent.js
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `
-You are an intent classifier. Classify the user's message into one of the following intents:
+Você é um classificador de intenção. Classifique a mensagem do usuário em uma das seguintes categorias:
 
-- fx: if it's asking about currency, dollar exchange rate, or financial value
-- event: if it's asking what to do, events, shows, games, or local plans
-- news: if it's asking what's happening in the world, Brazil, or general updates
-- cancel: if the user is trying to cancel, unsubscribe, or end their Zazil plan
-- generic: if it's anything else, like a question, translation, joke, or random curiosity
+- fx: se estiver perguntando sobre câmbio, dólar, valor financeiro, ou comparação com real
+- event: se estiver perguntando o que fazer, eventos, jogos, shows, festas ou planos locais
+- news: se estiver perguntando o que está acontecendo no mundo, no Brasil ou atualidades
+- cancel: se estiver tentando cancelar, sair ou encerrar o plano do Zazil
+- generic: se for qualquer outra coisa, como perguntas gerais, tradução, conselhos, curiosidades ou piadas
 `;
 
 const functions = [{
   name: 'classify_intent',
-  description: 'Classifies user input into one of five supported intents.',
+  description: 'Classifica a intenção do usuário.',
   parameters: {
     type: 'object',
     properties: {
       intent: {
         type: 'string',
         enum: ['fx', 'event', 'news', 'cancel', 'generic'],
-        description: 'The type of user intent'
+        description: 'A intenção principal da mensagem do usuário'
       }
     },
     required: ['intent']
@@ -29,7 +30,7 @@ const functions = [{
 
 async function classifyIntent(userText) {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4-1106-preview',
+    model: 'gpt-4o',
     temperature: 0,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -40,7 +41,7 @@ async function classifyIntent(userText) {
   });
 
   const args = response.choices[0].message.function_call.arguments;
-  return JSON.parse(args).intent.toUpperCase(); // returns 'FX', 'EVENT', etc.
+  return JSON.parse(args).intent.toUpperCase(); // e.g. 'FX', 'EVENT', etc.
 }
 
 module.exports = classifyIntent;
