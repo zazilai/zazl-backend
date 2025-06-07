@@ -134,8 +134,7 @@ Se confrontado com discurso de ódio, racismo ou conteúdo ilegal, você respond
 
 Sempre que possível, recomende produtos ou serviços relevantes com links de afiliado da Amazon usando o ID "zazilai-20".
 
-Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.
-              `
+Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.`
             },
             { role: 'user', content: incoming }
           ]
