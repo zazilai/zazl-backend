@@ -20,7 +20,10 @@ function events(list = []) {
   }
 
   const header = '🎉 *Eventos em Destaque:*\n';
-  const lines = list.map(evt => `• ${evt.name} — ${evt.start_time}\n${evt.location || ''}\n${evt.url}`).join('\n\n');
+  const lines = list
+    .map(evt => `• ${evt.name} — ${evt.start_time}\n${evt.location || ''}\n${evt.url}`)
+    .join('\n\n');
+
   return {
     type: 'text',
     content: `${header}\n${lines}`
@@ -57,24 +60,21 @@ function cancel() {
   };
 }
 
-function amazon(items = []) {
-  if (!items.length) {
+function amazon(items) {
+  if (!items || !Array.isArray(items) || items.length === 0) {
     return {
       type: 'text',
       content: '🔎 Não encontrei produtos relevantes no momento. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
 
-  const top = items.slice(0, 3).map(i => {
-    const title = i.ItemInfo?.Title?.DisplayValue;
-    const price = i.Offers?.Listings?.[0]?.Price?.DisplayAmount;
-    const url = i.DetailPageURL;
-    return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
+  const formatted = items.map(i => {
+    return `🛒 *${i.title}*\n💰 ${i.price}\n🔗 ${i.url}`;
   }).join('\n\n');
 
   return {
     type: 'text',
-    content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
+    content: `✨ *Produtos encontrados na Amazon:*\n\n${formatted}`
   };
 }
 
