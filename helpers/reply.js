@@ -7,7 +7,12 @@ function generic(content) {
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 *Cotação do Dólar Hoje:*\n\nUS$ 1 = R$ ${rate.buy}\n\n💡 Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:\nhttps://remit.ly/1bh2ujzp`
+    content: `💵 *Cotação do Dólar Hoje:*
+
+US$ 1 = R$ ${rate.buy}
+
+💸 Se estiver pensando em enviar dinheiro para o Brasil, use o Remitly com segurança e rapidez:
+https://remit.ly/1bh2ujzp`
   };
 }
 
@@ -19,11 +24,11 @@ function events(list = []) {
     };
   }
 
-  const header = '🎉 *Eventos em Destaque:*\n';
-  const lines = list
-    .map(evt => `• ${evt.name} — ${evt.start_time}\n${evt.location || ''}\n${evt.url}`)
-    .join('\n\n');
-
+  const header = '🎉 *Eventos em Destaque:*
+';
+  const lines = list.map(evt => `• ${evt.name || 'Evento'} — ${evt.start_time || 'Data indefinida'}
+${evt.location || ''}
+${evt.url}`).join('\n\n');
   return {
     type: 'text',
     content: `${header}\n${lines}`
@@ -33,7 +38,8 @@ function events(list = []) {
 function news(digest = '') {
   return {
     type: 'text',
-    content: `🗞️ *Resumo de Notícias:*\n\n${digest}`
+    content: `🗞️ *Resumo de Notícias:*
+\n${digest}`
   };
 }
 
@@ -60,21 +66,24 @@ function cancel() {
   };
 }
 
-function amazon(items) {
-  if (!items || !Array.isArray(items) || items.length === 0) {
+function amazon(items = []) {
+  if (!items.length) {
     return {
       type: 'text',
       content: '🔎 Não encontrei produtos relevantes no momento. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
 
-  const formatted = items.map(i => {
-    return `🛒 *${i.title}*\n💰 ${i.price}\n🔗 ${i.url}`;
+  const top = items.slice(0, 3).map(i => {
+    const title = i.ItemInfo?.Title?.DisplayValue;
+    const price = i.Offers?.Listings?.[0]?.Price?.DisplayAmount;
+    const url = i.DetailPageURL;
+    return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
   }).join('\n\n');
 
   return {
     type: 'text',
-    content: `✨ *Produtos encontrados na Amazon:*\n\n${formatted}`
+    content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
   };
 }
 
