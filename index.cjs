@@ -15,6 +15,7 @@ const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
+const amazonService = require('./helpers/amazon');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -101,6 +102,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       case 'NEWS': {
         const digest = await newsService.getDigest();
         replyObj = replyHelper.news(digest);
+        break;
+      }
+
+      case 'AMAZON': {
+        const items = await amazonService.searchAmazonProducts(incoming);
+        replyObj = replyHelper.amazon(items);
         break;
       }
 
