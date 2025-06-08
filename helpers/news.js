@@ -29,6 +29,7 @@ Pergunta: "${userQuery}"
       ]
     });
     const topics = completion.choices?.[0]?.message?.content?.trim() || '';
+    console.log('[extractNewsTopics] Extracted topics:', topics);
     return topics.replace(/(^"|"$)/g, '').replace(/\.$/, '');
   } catch (err) {
     console.error('[extractNewsTopics] OpenAI error', err);
@@ -42,11 +43,9 @@ Pergunta: "${userQuery}"
 async function getDigest(userQuery = '') {
   try {
     let extracted = await extractNewsTopics(userQuery);
-    // Use only the first topic/entity (best for GNews)
     let q = extracted.split(',')[0].trim();
     if (!q || q.length < 2) q = userQuery || 'Brasil';
 
-    // Always search in Portuguese/Brazil for your audience!
     const params = new URLSearchParams({
       q,
       lang: 'pt',
@@ -65,7 +64,8 @@ async function getDigest(userQuery = '') {
     if (response.status === 400 && q !== 'Brasil') {
       console.warn('[GNewsAPI] 400 error for query:', q, 'Retrying with "Brasil"');
       params.set('q', 'Brasil');
-      response = await fetch(`${BASE_URL}?${params.toString()}`);
+      url = `${BASE_URL}?${params.toString()}`;
+      response = await fetch(url);
     }
 
     if (!response.ok) {
@@ -76,6 +76,7 @@ async function getDigest(userQuery = '') {
 
     const data = await response.json();
     const articles = data.articles || [];
+    console.log('[GNewsAPI] Articles found:', articles.length);
 
     if (!articles.length) {
       return '🧐 Nenhuma notícia relevante encontrada. Tente buscar só pelo nome da pessoa ou assunto principal (ex: "Trump", "Musk", "Palmeiras").';
@@ -86,7 +87,8 @@ async function getDigest(userQuery = '') {
         a => `📰 *${a.title}*\n${a.description || ''}\n🔗 ${a.url}`
       )
       .join('\n\n');
-    return summary;
+
+    return summary || '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
   } catch (err) {
     console.error('[GNewsAPI] fetch error', err);
     return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
