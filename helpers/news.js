@@ -1,30 +1,76 @@
 // helpers/news.js
 
 const fetch = require('node-fetch');
+const { OpenAI } = require('openai');
 
 const API_KEY = process.env.GNEWS_API_KEY;
 const BASE_URL = 'https://gnews.io/api/v4/search';
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-async function getDigest(query = '') {
+/**
+ * Use GPT-4o to extract news topics/entities from the user's question.
+ * Returns a comma-separated string of main topics for news search.
+ */
+async function extractNewsTopics(userQuery) {
   try {
-    const q = query.trim() || 'Brasil EUA imigração cultura';
-    // GNews supports lang & country, customize as needed
+    const prompt = `
+A partir da pergunta abaixo, extraia apenas as pessoas, organizações, eventos, times, lugares ou tópicos principais que deveriam ser usados para buscar notícias recentes. Responda apenas com uma lista separada por vírgula, sem explicação ou frases.
+
+Pergunta: "${userQuery}"
+    `;
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      temperature: 0.2,
+      max_tokens: 30,
+      messages: [
+        { role: 'system', content: "Você é um extrator de tópicos de notícias. Só responda os tópicos principais separados por vírgula, sem frases." },
+        { role: 'user', content: prompt }
+      ]
+    });
+    const topics = completion.choices?.[0]?.message?.content?.trim() || '';
+    return topics.replace(/(^"|"$)/g, '').replace(/\.$/, '');
+  } catch (err) {
+    console.error('[extractNewsTopics] OpenAI error', err);
+    return '';
+  }
+}
+
+/**
+ * Given a user query, extract smart topics and search for recent news.
+ */
+async function getDigest(userQuery = '') {
+  try {
+    let q = await extractNewsTopics(userQuery);
+    if (!q || q.length < 2) q = userQuery || 'Brasil EUA imigração cultura';
+
+    // Simple guess: Use PT if it looks Brazilian, else EN. Tweak for your use case.
+    const looksPortuguese = /[ãõçáéíóúâêôà]/i.test(q) || /brasil|lula|palmeiras|imigração|eua/i.test(q);
+    const lang = looksPortuguese ? 'pt' : 'en';
+
     const params = new URLSearchParams({
       q,
-      lang: 'pt',        // Use 'pt' for Portuguese, 'en' for English, etc.
-      country: 'us',     // Use 'us' for United States news, 'br' for Brazil, etc.
+      lang,
       max: 5,
       apikey: API_KEY
     });
 
-    // Debug logs for troubleshooting
-    console.log('[GNewsAPI] Query:', q);
-    console.log('[GNewsAPI] Using key:', API_KEY ? API_KEY.slice(0, 8) : 'undefined');
+    let url = `${BASE_URL}?${params.toString()}`;
+    console.log('[GNewsAPI] Smart topics:', q);
+    console.log('[GNewsAPI] URL:', url);
 
-    const response = await fetch(`${BASE_URL}?${params.toString()}`);
+    let response = await fetch(url);
+
+    // Retry fallback if 400 Bad Request
+    if (response.status === 400 && q !== 'Musk') {
+      console.warn('[GNewsAPI] 400 error for query:', q, 'Retrying with "Musk"');
+      params.set('q', 'Musk');
+      response = await fetch(`${BASE_URL}?${params.toString()}`);
+    }
 
     if (!response.ok) {
-      console.error('[GNewsAPI] HTTP error', response.status, response.statusText);
+      const errorText = await response.text();
+      console.error('[GNewsAPI] HTTP error', response.status, errorText);
       return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
     }
 
@@ -32,8 +78,7 @@ async function getDigest(query = '') {
     const articles = data.articles || [];
 
     if (!articles.length) {
-      console.warn('[GNewsAPI] No articles found for query:', q);
-      return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
+      return '🧐 Nenhuma notícia relevante encontrada. Tente buscar só pelo nome da pessoa ou assunto principal (ex: "Trump", "Musk", "Palmeiras").';
     }
 
     const summary = articles
