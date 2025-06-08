@@ -7,8 +7,8 @@ const { OpenAI } = require('openai');
 const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
-const groovooService = require('./helpers/groovoo');  // FIXED
-const dolarService = require('./helpers/dolar');      // FIXED
+const groovooService = require('./helpers/groovoo');
+const dolarService = require('./helpers/dolar');
 const newsService = require('./helpers/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
@@ -70,13 +70,19 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
+    // ----- UPDATED: comprehensive cancel intent detection -----
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
       incomingLower.includes('cancelo zazil') ||
-      incomingLower.includes('cancelar plano')
+      incomingLower.includes('cancelar plano') ||
+      incomingLower.includes('cancelar assinatura') ||
+      incomingLower.includes('cancel my plan') ||
+      incomingLower.includes('cancel subscription') ||
+      incomingLower.includes('cancel zazil') ||
+      incomingLower.match(/\bcancel\b/)
     ) {
-      const cancelMsg = replyHelper.cancel();
+      const cancelMsg = replyHelper.cancel(waNumber);
       res.type('text/xml');
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
@@ -100,7 +106,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
 
       case 'NEWS': {
-        const digest = await newsService.getDigest(incoming); // ✅ Aceita prompt
+        const digest = await newsService.getDigest(incoming);
         replyObj = replyHelper.news(digest);
         break;
       }

@@ -89,11 +89,13 @@ Assine o plano *Pro ilimitado* para continuar usando o Zazil sem limites:
   };
 }
 
-function cancel() {
+// ---- UPDATED FUNCTION ----
+function cancel(waNumber) {
+  const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
     content: `❌ Para gerenciar ou cancelar sua assinatura, acesse:
-https://worldofbrazil.ai/gerenciar`
+https://zazl-backend.onrender.com/gerenciar?wa=${clean}`
   };
 }
 
