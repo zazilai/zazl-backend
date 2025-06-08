@@ -1,5 +1,3 @@
-// helpers/news.js
-
 const fetch = require('node-fetch');
 const { OpenAI } = require('openai');
 
@@ -8,10 +6,11 @@ const BASE_URL = 'https://gnews.io/api/v4/search';
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-/**
- * Use GPT-4o to extract news topics/entities from the user's question.
- * Returns a comma-separated string of main topics for news search.
- */
+function sanitizeQuery(raw) {
+  // Remove commas and other punctuation except for letters, numbers, and spaces
+  return raw.replace(/[,\|]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 async function extractNewsTopics(userQuery) {
   try {
     const prompt = `
@@ -36,21 +35,19 @@ Pergunta: "${userQuery}"
   }
 }
 
-/**
- * Given a user query, extract smart topics and search for recent news.
- */
 async function getDigest(userQuery = '') {
   try {
     let q = await extractNewsTopics(userQuery);
     if (!q || q.length < 2) q = userQuery || 'Brasil EUA imigração cultura';
 
-    // Simple guess: Use PT if it looks Brazilian, else EN. Tweak for your use case.
-    const looksPortuguese = /[ãõçáéíóúâêôà]/i.test(q) || /brasil|lula|palmeiras|imigração|eua/i.test(q);
-    const lang = looksPortuguese ? 'pt' : 'en';
+    // **Sanitize the query for GNews**
+    q = sanitizeQuery(q);
 
+    // Always search in Portuguese/Brazil for your audience!
     const params = new URLSearchParams({
       q,
-      lang,
+      lang: 'pt',
+      country: 'br',
       max: 5,
       apikey: API_KEY
     });
@@ -62,9 +59,9 @@ async function getDigest(userQuery = '') {
     let response = await fetch(url);
 
     // Retry fallback if 400 Bad Request
-    if (response.status === 400 && q !== 'Musk') {
-      console.warn('[GNewsAPI] 400 error for query:', q, 'Retrying with "Musk"');
-      params.set('q', 'Musk');
+    if (response.status === 400 && q !== 'Brasil') {
+      console.warn('[GNewsAPI] 400 error for query:', q, 'Retrying with "Brasil"');
+      params.set('q', 'Brasil');
       response = await fetch(`${BASE_URL}?${params.toString()}`);
     }
 
