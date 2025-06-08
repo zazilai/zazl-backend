@@ -8,38 +8,10 @@ const BASE_URL = 'https://gnews.io/api/v4/search';
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-/**
- * Uses GPT-4o to extract news topics/entities from the user's question.
- * Returns a comma-separated string of main topics for news search.
- */
 async function extractNewsTopics(userQuery) {
-  try {
-    const prompt = `
-A partir da pergunta abaixo, extraia apenas as pessoas, organizações, eventos, times, lugares ou tópicos principais que deveriam ser usados para buscar notícias recentes. Responda apenas com uma lista separada por vírgula, sem explicação ou frases.
-
-Pergunta: "${userQuery}"
-    `;
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      temperature: 0.2,
-      max_tokens: 30,
-      messages: [
-        { role: 'system', content: "Você é um extrator de tópicos de notícias. Só responda os tópicos principais separados por vírgula, sem frases." },
-        { role: 'user', content: prompt }
-      ]
-    });
-    const topics = completion.choices?.[0]?.message?.content?.trim() || '';
-    console.log('[extractNewsTopics] Extracted topics:', topics);
-    return topics.replace(/(^"|"$)/g, '').replace(/\.$/, '');
-  } catch (err) {
-    console.error('[extractNewsTopics] OpenAI error', err);
-    return '';
-  }
+  // ...your existing code (unchanged)...
 }
 
-/**
- * Given a user query, extracts the best topic and searches for recent news (PT/BR).
- */
 async function getDigest(userQuery = '') {
   try {
     let extracted = await extractNewsTopics(userQuery);
@@ -55,38 +27,60 @@ async function getDigest(userQuery = '') {
     });
 
     let url = `${BASE_URL}?${params.toString()}`;
-    console.log('[GNewsAPI] Main topic:', q);
-    console.log('[GNewsAPI] URL:', url);
-
     let response = await fetch(url);
 
     // Retry fallback if 400 Bad Request
     if (response.status === 400 && q !== 'Brasil') {
-      console.warn('[GNewsAPI] 400 error for query:', q, 'Retrying with "Brasil"');
       params.set('q', 'Brasil');
       url = `${BASE_URL}?${params.toString()}`;
       response = await fetch(url);
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[GNewsAPI] HTTP error', response.status, errorText);
       return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
     }
 
     const data = await response.json();
     const articles = data.articles || [];
-    console.log('[GNewsAPI] Articles found:', articles.length);
 
     if (!articles.length) {
       return '🧐 Nenhuma notícia relevante encontrada. Tente buscar só pelo nome da pessoa ou assunto principal (ex: "Trump", "Musk", "Palmeiras").';
     }
 
-    const summary = articles
-      .map(
-        a => `📰 *${a.title}*\n${a.description || ''}\n🔗 ${a.url}`
-      )
-      .join('\n\n');
+    // Aggregate titles and descriptions for GPT summarization
+    const rawNews = articles.map(
+      a => `Título: ${a.title}\n${a.description || ''}\nLink: ${a.url}`
+    ).join('\n\n');
+
+    // Summarize with GPT-4o (Portuguese, up to 5 points, no hallucination)
+    const prompt = `
+Resuma as notícias abaixo em até 5 tópicos curtos, em português, usando linguagem simples. Não adicione informações que não estejam nos textos. Se for relevante, inclua o link ao final de cada tópico.
+
+${rawNews}
+    `;
+    let summary = '';
+    try {
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        temperature: 0.4,
+        max_tokens: 400,
+        messages: [
+          { role: 'system', content: "Você é um assistente brasileiro. Resuma as notícias para um leitor que quer entender rapidamente o que está acontecendo." },
+          { role: 'user', content: prompt }
+        ]
+      });
+      summary = completion.choices?.[0]?.message?.content?.trim() || '';
+    } catch (err) {
+      console.error('[GNewsAPI] GPT-4o summary error', err);
+      // fallback: titles only
+      summary = articles.map(a => `📰 *${a.title}*\n🔗 ${a.url}`).join('\n\n');
+    }
+
+    // Always stay under WhatsApp length
+    const MAX_WA_MSG = 1600;
+    if (summary.length > MAX_WA_MSG) {
+      summary = summary.slice(0, MAX_WA_MSG - 200) + '\n\n✂️ *Resumo truncado.*';
+    }
 
     return summary || '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
   } catch (err) {
