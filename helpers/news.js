@@ -1,3 +1,5 @@
+// helpers/news.js
+
 const fetch = require('node-fetch');
 const { OpenAI } = require('openai');
 
@@ -6,11 +8,10 @@ const BASE_URL = 'https://gnews.io/api/v4/search';
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-function sanitizeQuery(raw) {
-  // Remove commas and other punctuation except for letters, numbers, and spaces
-  return raw.replace(/[,\|]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
+/**
+ * Uses GPT-4o to extract news topics/entities from the user's question.
+ * Returns a comma-separated string of main topics for news search.
+ */
 async function extractNewsTopics(userQuery) {
   try {
     const prompt = `
@@ -35,13 +36,15 @@ Pergunta: "${userQuery}"
   }
 }
 
+/**
+ * Given a user query, extracts the best topic and searches for recent news (PT/BR).
+ */
 async function getDigest(userQuery = '') {
   try {
-    let q = await extractNewsTopics(userQuery);
-    if (!q || q.length < 2) q = userQuery || 'Brasil EUA imigração cultura';
-
-    // **Sanitize the query for GNews**
-    q = sanitizeQuery(q);
+    let extracted = await extractNewsTopics(userQuery);
+    // Use only the first topic/entity (best for GNews)
+    let q = extracted.split(',')[0].trim();
+    if (!q || q.length < 2) q = userQuery || 'Brasil';
 
     // Always search in Portuguese/Brazil for your audience!
     const params = new URLSearchParams({
@@ -53,7 +56,7 @@ async function getDigest(userQuery = '') {
     });
 
     let url = `${BASE_URL}?${params.toString()}`;
-    console.log('[GNewsAPI] Smart topics:', q);
+    console.log('[GNewsAPI] Main topic:', q);
     console.log('[GNewsAPI] URL:', url);
 
     let response = await fetch(url);
