@@ -1,3 +1,5 @@
+// helpers/news.js
+
 const fetch = require('node-fetch');
 const { OpenAI } = require('openai');
 
@@ -30,79 +32,89 @@ Pergunta: "${userQuery}"
   }
 }
 
-async function fetchArticles(query) {
-  const params = new URLSearchParams({
-    q: query,
-    lang: 'pt',
-    country: 'br',
-    max: 5,
-    apikey: API_KEY
-  });
-  const url = `${BASE_URL}?${params.toString()}`;
-  const response = await fetch(url);
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.articles || [];
+async function summarizeArticles(articles, userQuery) {
+  try {
+    const newsList = articles
+      .map((a, i) => `Notícia ${i+1}:\nTítulo: ${a.title}\nDescrição: ${a.description || ''}\nFonte: ${a.source?.name || ''}\nLink: ${a.url}`)
+      .join('\n\n');
+
+    const prompt = `
+Você é um assistente brasileiro especializado em notícias atuais.
+Com base nas notícias abaixo, responda à pergunta do usuário de forma clara, útil e resumida (máximo 5 linhas). Responda sempre em português. 
+Inclua as informações mais recentes e relevantes, cite fontes se possível, e não invente dados. Se não houver nada relevante, diga "Nenhuma notícia relevante encontrada no momento."
+
+Pergunta: "${userQuery}"
+
+Notícias:
+${newsList}
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      temperature: 0.3,
+      max_tokens: 250,
+      messages: [
+        { role: 'system', content: "Você é um assistente de notícias, sempre responde apenas com o resumo das notícias, em português." },
+        { role: 'user', content: prompt }
+      ]
+    });
+    return completion.choices?.[0]?.message?.content?.trim() || '';
+  } catch (err) {
+    console.error('[summarizeArticles] OpenAI error', err);
+    return '';
+  }
 }
 
 async function getDigest(userQuery = '') {
   try {
     let extracted = await extractNewsTopics(userQuery);
-    let q = (extracted && extracted.split(',')[0]?.trim()) || userQuery || 'Brasil';
+    if (!extracted || typeof extracted !== 'string') extracted = '';
+    let q = extracted.split(',')[0]?.trim();
+    if (!q || q.length < 2) q = userQuery || 'Brasil';
 
-    let articles = await fetchArticles(q);
+    const params = new URLSearchParams({
+      q,
+      lang: 'pt',
+      country: 'br',
+      max: 5,
+      apikey: API_KEY
+    });
 
-    // Fallback if GNews fails or finds nothing
-    if (!articles.length && q !== 'Brasil') {
-      articles = await fetchArticles('Brasil');
+    let url = `${BASE_URL}?${params.toString()}`;
+    console.log('[GNewsAPI] Main topic:', q);
+    console.log('[GNewsAPI] URL:', url);
+
+    let response = await fetch(url);
+
+    // Retry fallback if 400 Bad Request
+    if (response.status === 400 && q !== 'Brasil') {
+      console.warn('[GNewsAPI] 400 error for query:', q, 'Retrying with "Brasil"');
+      params.set('q', 'Brasil');
+      url = `${BASE_URL}?${params.toString()}`;
+      response = await fetch(url);
     }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[GNewsAPI] HTTP error', response.status, errorText);
+      return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
+    }
+
+    const data = await response.json();
+    const articles = data.articles || [];
+    console.log('[GNewsAPI] Articles found:', articles.length);
 
     if (!articles.length) {
       return '🧐 Nenhuma notícia relevante encontrada. Tente buscar só pelo nome da pessoa ou assunto principal (ex: "Trump", "Musk", "Palmeiras").';
     }
 
-    // Construct a context for GPT
-    // Only pass title/description/url to keep prompt short
-    const articleSummaries = articles.map(
-      (a, i) => `Notícia ${i + 1}:\nTítulo: ${a.title}\nResumo: ${a.description || ''}\nURL: ${a.url}\n`
-    ).join('\n');
-
-    const systemPrompt = `
-Você é um assistente que responde perguntas usando apenas as notícias fornecidas abaixo. Responda de forma clara e objetiva em português brasileiro. 
-Se a resposta exata não estiver nas notícias, diga que não foi possível encontrar uma resposta precisa, mas resuma o contexto relevante das notícias se houver.
-Inclua links das notícias mais relevantes na resposta, se possível.
-    `;
-
-    const userPrompt = `
-Pergunta: "${userQuery}"
-
-Notícias Recentes:
-${articleSummaries}
-    `;
-
-    // Compose and get the GPT answer
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      temperature: 0.2,
-      max_tokens: 400,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ]
-    });
-
-    let reply = completion.choices?.[0]?.message?.content?.trim();
-    // Defensive: fallback to generic if no reply
-    if (!reply || typeof reply !== 'string') {
-      reply = '🧐 Não foi possível encontrar uma resposta precisa nas notícias mais recentes.';
-    }
-    // Truncate to 1200 chars for WhatsApp/Twilio safety
-    if (reply.length > 1200) {
-      reply = reply.slice(0, 1150) + '\n\n✂️ Resposta resumida. Para mais detalhes, busque no Google Notícias!';
-    }
-    return reply;
+    // Call OpenAI to summarize articles
+    const summary = await summarizeArticles(articles, userQuery);
+    return summary && summary.length > 0
+      ? summary
+      : '📉 Nenhuma notícia relevante encontrada no momento. Tente novamente em breve.';
   } catch (err) {
-    console.error('[GNewsAPI] fetch or GPT error', err);
+    console.error('[GNewsAPI] fetch error', err);
     return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
   }
 }
