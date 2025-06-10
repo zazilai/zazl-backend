@@ -5,8 +5,7 @@ const { OpenAI } = require('openai');
 
 const API_KEY = process.env.GNEWS_API_KEY;
 const BASE_URL = 'https://gnews.io/api/v4/search';
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
-const openai = new OpenAI({ apiKey: OPENAI_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function extractNewsTopics(userQuery) {
   try {
@@ -32,39 +31,42 @@ Pergunta: "${userQuery}"
   }
 }
 
-async function summarizeArticles(articles, userQuery) {
+// -- New: summarizeNews --
+async function summarizeNews(userQuery, articles = []) {
   try {
-    const newsList = articles
-      .map((a, i) => `Notícia ${i+1}:\nTítulo: ${a.title}\nDescrição: ${a.description || ''}\nFonte: ${a.source?.name || ''}\nLink: ${a.url}`)
-      .join('\n\n');
+    if (!Array.isArray(articles) || !articles.length) {
+      return '';
+    }
+    // Limit to 5 for OpenAI prompt size
+    const newsList = articles.slice(0, 5).map(a =>
+      `Título: ${a.title}\nDescrição: ${a.description || ''}\nLink: ${a.url}`
+    ).join('\n\n');
 
     const prompt = `
-Você é um assistente brasileiro especializado em notícias atuais.
-Com base nas notícias abaixo, responda à pergunta do usuário de forma clara, útil e resumida (máximo 5 linhas). Responda sempre em português. 
-Inclua as informações mais recentes e relevantes, cite fontes se possível, e não invente dados. Se não houver nada relevante, diga "Nenhuma notícia relevante encontrada no momento."
-
-Pergunta: "${userQuery}"
+Resuma as notícias abaixo em português claro, respondendo diretamente à pergunta do usuário ("${userQuery}"). Foque no que há de mais atual e relevante. Use linguagem informal, como se fosse um amigo contando as novidades, e inclua os principais links.
 
 Notícias:
 ${newsList}
-`;
 
+Resumo:
+    `;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
-      temperature: 0.3,
-      max_tokens: 250,
+      temperature: 0.4,
+      max_tokens: 400,
       messages: [
-        { role: 'system', content: "Você é um assistente de notícias, sempre responde apenas com o resumo das notícias, em português." },
+        { role: 'system', content: 'Você é um assistente brasileiro. Resuma as notícias para o usuário de forma clara, atualizada e útil.' },
         { role: 'user', content: prompt }
       ]
     });
     return completion.choices?.[0]?.message?.content?.trim() || '';
   } catch (err) {
-    console.error('[summarizeArticles] OpenAI error', err);
+    console.error('[summarizeNews] OpenAI error', err);
     return '';
   }
 }
 
+// -- Main export --
 async function getDigest(userQuery = '') {
   try {
     let extracted = await extractNewsTopics(userQuery);
@@ -104,15 +106,20 @@ async function getDigest(userQuery = '') {
     const articles = data.articles || [];
     console.log('[GNewsAPI] Articles found:', articles.length);
 
+    // -- Resilient fallback --
     if (!articles.length) {
       return '🧐 Nenhuma notícia relevante encontrada. Tente buscar só pelo nome da pessoa ou assunto principal (ex: "Trump", "Musk", "Palmeiras").';
     }
 
-    // Call OpenAI to summarize articles
-    const summary = await summarizeArticles(articles, userQuery);
-    return summary && summary.length > 0
-      ? summary
-      : '📉 Nenhuma notícia relevante encontrada no momento. Tente novamente em breve.';
+    // -- New: Use OpenAI to summarize, fallback if fails --
+    const summary = await summarizeNews(userQuery, articles);
+    if (!summary || summary.length < 10) {
+      // fallback: show basic headlines/links
+      return articles.slice(0, 3).map(a =>
+        `📰 *${a.title}*\n${a.description || ''}\n🔗 ${a.url}`
+      ).join('\n\n');
+    }
+    return summary;
   } catch (err) {
     console.error('[GNewsAPI] fetch error', err);
     return '📉 Nenhuma notícia recente encontrada no momento. Tente novamente em breve.';
