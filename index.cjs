@@ -16,6 +16,7 @@ const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
+const perplexityService = require('./helpers/perplexity'); // <-- NEW
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -70,43 +71,57 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Use smart intent classification for ALL routing (no more manual cancel matching)
+    // ----- CANCEL HANDLING -----
+    const incomingLower = incoming.toLowerCase();
+    if (
+      incomingLower.includes('cancelar zazil') ||
+      incomingLower.includes('cancelo zazil') ||
+      incomingLower.includes('cancelar plano') ||
+      incomingLower.includes('cancelar assinatura') ||
+      incomingLower.includes('cancel my plan') ||
+      incomingLower.includes('cancel subscription') ||
+      incomingLower.includes('cancel zazil') ||
+      incomingLower.match(/\bcancel\b/)
+    ) {
+      const cancelMsg = replyHelper.cancel(waNumber);
+      res.type('text/xml');
+      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
+    }
+
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
 
     switch (intent) {
-      case 'CANCEL': {
-        replyObj = replyHelper.cancel(waNumber);
-        break;
-      }
-
       case 'EVENT': {
         const events = await groovooService.getEvents(incoming);
         replyObj = replyHelper.events(events);
         break;
       }
-
       case 'FX': {
         const rate = await dolarService.getRate();
         replyObj = replyHelper.dolar(rate);
         break;
       }
-
       case 'NEWS': {
         const digest = await newsService.getDigest(incoming);
         replyObj = replyHelper.news(digest);
         break;
       }
-
       case 'AMAZON': {
         const items = await amazonService.searchAmazonProducts(incoming);
         replyObj = replyHelper.amazon(items);
         break;
       }
-
+      case 'GENERIC': {
+        // Use Perplexity for fact-based generic
+        const { answer } = await perplexityService.search(incoming);
+        replyObj = replyHelper.generic(answer);
+        break;
+      }
       default: {
+        // OpenAI fallback
         const gpt = await openai.chat.completions.create({
           model: 'gpt-4o',
           temperature: 0.7,

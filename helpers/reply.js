@@ -1,18 +1,19 @@
 // helpers/reply.js
 
-function generic(content) {
-  return { type: 'text', content };
+function generic(content = '') {
+  if (!content.trim()) {
+    return { type: 'text', content: '🤖 Não consegui encontrar uma resposta no momento.' };
+  }
+  return {
+    type: 'text',
+    content: `🤖 *Zazil Responde:*\n\n${content}`
+  };
 }
 
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 *Cotação do Dólar Hoje:*
-
-US$ 1 = R$ ${rate.buy}
-
-Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
-👉 https://remit.ly/1bh2ujzp`
+    content: `💵 *Cotação do Dólar Hoje:*\n\nUS$ 1 = R$ ${rate.buy}\n\nSe estiver pensando em enviar dinheiro para o Brasil, use a Remitly:\n👉 https://remit.ly/1bh2ujzp`
   };
 }
 
@@ -23,7 +24,6 @@ function events(list = []) {
       content: '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!'
     };
   }
-
   const header = '🎉 *Eventos em Destaque:*\n\n';
   const lines = list.map(evt => {
     const date = evt.start_time || '';
@@ -46,12 +46,9 @@ function news(digest = '') {
       content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
     };
   }
-
   return {
     type: 'text',
-    content: `🗞️ *Resumo de Notícias:*
-
-${digest}`
+    content: `🗞️ *Resumo de Notícias:*\n\n${digest}`
   };
 }
 
@@ -59,26 +56,25 @@ function welcome(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
-    content: `👋 Olá, eu sou o Zazil — seu amigo brasileiro inteligente nos EUA 🇧🇷🤖
+    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
 
-🎁 *Teste grátis por 7 dias!*  
-Por agora, você pode usar o Zazil de graça para experimentar tudo que ele faz!
+*Você está no período de teste grátis de 7 dias do Zazil!* Aproveite para experimentar todas as funcionalidades.
 
-🚀 *Planos disponíveis:*
-- 🟢 *Lite*: $4.99/mês, até 15 mensagens por dia
-- 🔵 *Pro*: $9.99/mês, mensagens ilimitadas!
+Assine o Zazil hoje mesmo e escolha o plano ideal para você:
+🟢 *Lite* — $4.99/mês (até 15 mensagens por dia)
+🔵 *Pro* — $9.99/mês (mensagens ilimitadas)
 
-Assine já para liberar todo o potencial do Zazil:  
-Lite 👉 https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}  
-Pro 👉 https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+Por agora, você pode testar o Zazil de graça por 7 dias. Assina aí vai! 😄
 
-❗ *Importante*:  
-- Ainda não entendo áudios ou mensagens de voz  
-- Por favor mandar perguntas completas em uma mensagem unica!
+Links para assinatura:
+• Lite: https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+• Pro: https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
-Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).
+❗ *Importante:*
+- Ainda não entendo áudios. Por favor, mande apenas texto!
+- Envie sua dúvida completa em uma única mensagem.
 
-Assina aí, vai! 😉`
+Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
   };
 }
 
@@ -93,7 +89,6 @@ Assine o plano *Pro ilimitado* para continuar usando o Zazil sem limites:
   };
 }
 
-// ---- UPDATED FUNCTION ----
 function cancel(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
@@ -104,7 +99,6 @@ https://zazl-backend.onrender.com/gerenciar?wa=${clean}`
 }
 
 function amazon(items) {
-  // Defensive: ensure items is always an array
   if (!Array.isArray(items) || !items.length) {
     return {
       type: 'text',
