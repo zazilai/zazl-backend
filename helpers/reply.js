@@ -99,13 +99,27 @@ https://zazl-backend.onrender.com/gerenciar?wa=${clean}`
   };
 }
 
-function amazon(items = []) {
-  if (!items.length) {
+function amazon(items) {
+  // Defensive: ensure items is always an array
+  if (!Array.isArray(items) || !items.length) {
     return {
       type: 'text',
       content: '🔎 Não encontrei produtos relevantes no momento. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
+
+  const top = items.map(i => {
+    const title = i.title || 'Produto';
+    const price = i.price || 'Preço não disponível';
+    const url = i.url || '';
+    return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
+  }).join('\n\n');
+
+  return {
+    type: 'text',
+    content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
+  };
+}
 
   const top = items.map(i => {
     const title = i.title || 'Produto';
