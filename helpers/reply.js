@@ -1,19 +1,18 @@
 // helpers/reply.js
 
-function generic(content = '') {
-  if (!content.trim()) {
-    return { type: 'text', content: '🤖 Não consegui encontrar uma resposta no momento.' };
-  }
-  return {
-    type: 'text',
-    content: `🤖 *Zazil Responde:*\n\n${content}`
-  };
+function generic(content) {
+  return { type: 'text', content };
 }
 
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 *Cotação do Dólar Hoje:*\n\nUS$ 1 = R$ ${rate.buy}\n\nSe estiver pensando em enviar dinheiro para o Brasil, use a Remitly:\n👉 https://remit.ly/1bh2ujzp`
+    content: `💵 *Cotação do Dólar Hoje:*
+
+US$ 1 = R$ ${rate.buy}
+
+Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
+👉 https://remit.ly/1bh2ujzp`
   };
 }
 
@@ -24,6 +23,7 @@ function events(list = []) {
       content: '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!'
     };
   }
+
   const header = '🎉 *Eventos em Destaque:*\n\n';
   const lines = list.map(evt => {
     const date = evt.start_time || '';
@@ -46,9 +46,12 @@ function news(digest = '') {
       content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
     };
   }
+
   return {
     type: 'text',
-    content: `🗞️ *Resumo de Notícias:*\n\n${digest}`
+    content: `🗞️ *Resumo de Notícias:*
+
+${digest}`
   };
 }
 
@@ -58,23 +61,23 @@ function welcome(waNumber) {
     type: 'text',
     content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
 
-*Você está no período de teste grátis de 7 dias do Zazil!* Aproveite para experimentar todas as funcionalidades.
+🎉 Você está no período de *teste grátis* do Zazil (7 dias)! Aproveite para experimentar todas as funções.
 
-Assine o Zazil hoje mesmo e escolha o plano ideal para você:
-🟢 *Lite* — $4.99/mês (até 15 mensagens por dia)
-🔵 *Pro* — $9.99/mês (mensagens ilimitadas)
+🔔 *Assine o Zazil hoje mesmo!*
+- *Plano Lite*: $4.99/mês, até 15 mensagens/dia
+- *Plano Pro*: $9.99/mês, mensagens ilimitadas
 
-Por agora, você pode testar o Zazil de graça por 7 dias. Assina aí vai! 😄
-
-Links para assinatura:
-• Lite: https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-• Pro: https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+👉 Para assinar ou gerenciar seu plano:
+https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
 ❗ *Importante:*
-- Ainda não entendo áudios. Por favor, mande apenas texto!
-- Envie sua dúvida completa em uma única mensagem.
+- Ainda não entendo áudios, só mensagens de texto por enquanto!
+- Tente mandar sua pergunta completa em uma única mensagem.
 
-Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
+Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).
+
+Por agora, aproveite para testar o Zazil de graça por 7 dias. Assina aí, vai! 😄`
   };
 }
 

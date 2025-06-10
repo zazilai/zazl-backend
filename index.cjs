@@ -9,14 +9,13 @@ const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const groovooService = require('./helpers/groovoo');
 const dolarService = require('./helpers/dolar');
-const newsService = require('./helpers/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const perplexityService = require('./helpers/perplexity'); // <-- NEW
+const perplexityService = require('./helpers/perplexity'); // <- Only "search" API for facts/news
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -71,7 +70,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // ----- CANCEL HANDLING -----
+    // Cancel intent detection (comprehensive)
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -104,9 +103,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.dolar(rate);
         break;
       }
-      case 'NEWS': {
-        const digest = await newsService.getDigest(incoming);
-        replyObj = replyHelper.news(digest);
+      case 'NEWS':
+      case 'GENERIC': {
+        // Both use Perplexity for up-to-date, reliable info
+        const result = await perplexityService.search(incoming);
+        // Defensive: show fallback if API fails
+        replyObj = replyHelper.generic(
+          result.answer ||
+          '🗞️ Desculpe, não consegui encontrar informações atualizadas no momento. Tente de novo mais tarde.'
+        );
         break;
       }
       case 'AMAZON': {
@@ -114,14 +119,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.amazon(items);
         break;
       }
-      case 'GENERIC': {
-        // Use Perplexity for fact-based generic
-        const { answer } = await perplexityService.search(incoming);
-        replyObj = replyHelper.generic(answer);
-        break;
-      }
       default: {
-        // OpenAI fallback
+        // Fallback to OpenAI for non-news/fact queries
         const gpt = await openai.chat.completions.create({
           model: 'gpt-4o',
           temperature: 0.7,

@@ -5,6 +5,16 @@ const fetch = require('node-fetch');
 const API_KEY = process.env.PPLX_API_KEY; // Set this in Render as PPLX_API_KEY!
 const BASE_URL = 'https://api.perplexity.ai/chat/completions';
 
+// Helper to wrap fetch with timeout
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Request timed out')), timeoutMs)
+    )
+  ]);
+}
+
 /**
  * Queries Perplexity API for a smart, current, summarized answer.
  * @param {string} query - The user's question.
@@ -31,7 +41,7 @@ async function search(query) {
   };
 
   try {
-    const response = await fetch(BASE_URL, {
+    const response = await fetchWithTimeout(BASE_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${API_KEY}`,
