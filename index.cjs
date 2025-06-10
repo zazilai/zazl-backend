@@ -122,7 +122,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       default: {
         // Fallback to OpenAI for non-news/fact queries
         const gpt = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: 'o3',
           temperature: 0.7,
           max_tokens: 2048,
           messages: [

@@ -21,7 +21,7 @@ Responda APENAS com uma palavra: NEWS, FX, EVENT, AMAZON, CANCEL ou GENERIC.
 async function classifyIntent(userText) {
   const prompt = SYSTEM_PROMPT.replace('{user}', userText);
   const resp = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'o3',
     temperature: 0,
     max_tokens: 1,
     messages: [
