@@ -5,7 +5,7 @@ const fetch = require('node-fetch');
 const API_KEY = process.env.PPLX_API_KEY; // Set this in Render as PPLX_API_KEY!
 const BASE_URL = 'https://api.perplexity.ai/chat/completions';
 
-// Helper to wrap fetch with timeout (prevents server from hanging)
+// Helper to wrap fetch with timeout
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   return Promise.race([
     fetch(url, options),
@@ -27,7 +27,7 @@ async function search(query) {
   }
 
   const body = {
-    model: 'pplx-7b-online', // ✅ Official public model for real-time answers (June 2025)
+    model: 'sonar', // Or 'sonar-pro' for higher quality (higher cost)
     messages: [
       {
         role: 'system',
