@@ -59,22 +59,26 @@ function welcome(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
-    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
+    content: `👋 Olá, eu sou o Zazil — seu amigo brasileiro inteligente nos EUA 🇧🇷🤖
 
-Você está no plano *Lite grátis por 7 dias* — pode me mandar até 15 mensagens por dia!
+🎁 *Teste grátis por 7 dias!*  
+Por agora, você pode usar o Zazil de graça para experimentar tudo que ele faz!
 
-💡 Se quiser mais liberdade:
-🟢 Assinar Lite (15 msgs/dia):
-https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+🚀 *Planos disponíveis:*
+- 🟢 *Lite*: $4.99/mês, até 15 mensagens por dia
+- 🔵 *Pro*: $9.99/mês, mensagens ilimitadas!
 
-🔵 Assinar Pro (mensagens ilimitadas):
-https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+Assine já para liberar todo o potencial do Zazil:  
+Lite 👉 https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}  
+Pro 👉 https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
-❗ *Importante:*
-- Não envio nem entendo áudios;
-- Prefiro que mande sua pergunta completa em uma única mensagem.
+❗ *Importante*:  
+- Ainda não entendo áudios ou mensagens de voz  
+- Por favor mandar perguntas completas em uma mensagem unica!
 
-Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
+Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).
+
+Assina aí, vai! 😉`
   };
 }
 
@@ -118,21 +122,6 @@ function amazon(items) {
   return {
     type: 'text',
     content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
-  };
-}
-
-  const top = items.map(i => {
-    const title = i.title || 'Produto';
-    const price = i.price || 'Preço não disponível';
-    const url = i.url;
-    return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
-  }).join('\n\n');
-
-  return {
-    type: 'text',
-    content: `✨ *Produtos encontrados na Amazon:*
-
-${top}`
   };
 }
 
