@@ -1,47 +1,40 @@
+// helpers/classifyIntent.js
+
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `
-Você é um classificador de intenção. Classifique a mensagem do usuário em uma das seguintes categorias:
+Você é um classificador de intenção para um assistente brasileiro no WhatsApp.
+Sua tarefa é analisar a mensagem do usuário e responder apenas com UMA destas intenções (em maiúsculas):
 
-- fx: se estiver perguntando sobre câmbio, dólar, valor financeiro, ou comparação com real
-- event: se estiver perguntando o que fazer, eventos, jogos, shows, festas ou planos locais
-- news: se estiver perguntando o que está acontecendo no mundo, no Brasil ou atualidades
-- amazon: se estiver perguntando onde comprar, quanto custa, ou pedindo recomendações de produtos (raquete, panela, tênis, Alexa, etc)
-- cancel: se estiver tentando cancelar, sair ou encerrar o plano do Zazil
-- generic: se for qualquer outra coisa, como perguntas gerais, tradução, conselhos, curiosidades ou piadas
+- NEWS: se a pessoa pergunta sobre fatos, pessoas, eventos atuais, notícias, acontecimentos, resultados de jogos, situação atual, nomes de políticos, times, atualidades, "quem é", "quanto está", etc.
+- FX: se for sobre dólar, câmbio, cotação ou comparação de moeda.
+- EVENT: se for sobre eventos, festas, shows, jogos futuros, "o que fazer", "o que tem pra fazer", programação, onde ir.
+- AMAZON: se for sobre comprar, preços, produtos, recomendações de itens, lojas, "onde compro", "quanto custa".
+- CANCEL: se for sobre cancelar plano, assinatura, sair, encerrar, "cancelar Zazil".
+- GENERIC: para tudo o resto (ex: dúvidas gerais, traduções, dicas de vida, conselhos, curiosidades, piadas, desabafos, saudações, perguntas pessoais, etc).
+
+Mensagem do usuário: "{user}"
+Responda APENAS com uma palavra: NEWS, FX, EVENT, AMAZON, CANCEL ou GENERIC.
 `;
 
-const functions = [{
-  name: 'classify_intent',
-  description: 'Classifica a intenção do usuário.',
-  parameters: {
-    type: 'object',
-    properties: {
-      intent: {
-        type: 'string',
-        enum: ['fx', 'event', 'news', 'cancel', 'amazon', 'generic'],
-        description: 'A intenção principal da mensagem do usuário'
-      }
-    },
-    required: ['intent']
-  }
-}];
-
 async function classifyIntent(userText) {
-  const response = await openai.chat.completions.create({
+  const prompt = SYSTEM_PROMPT.replace('{user}', userText);
+  const resp = await openai.chat.completions.create({
     model: 'gpt-4o',
     temperature: 0,
+    max_tokens: 1,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userText }
-    ],
-    functions,
-    function_call: { name: 'classify_intent' }
+      { role: 'system', content: prompt }
+    ]
   });
 
-  const args = response.choices[0].message.function_call.arguments;
-  return JSON.parse(args).intent.toUpperCase(); // returns 'FX', 'AMAZON', etc.
+  const intent = resp.choices?.[0]?.message?.content?.trim().toUpperCase();
+  // Always default to GENERIC to avoid crashes
+  if (['NEWS', 'FX', 'EVENT', 'AMAZON', 'CANCEL', 'GENERIC'].includes(intent)) {
+    return intent;
+  }
+  return 'GENERIC';
 }
 
 module.exports = classifyIntent;

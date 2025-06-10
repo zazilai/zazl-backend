@@ -70,29 +70,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // ----- UPDATED: comprehensive cancel intent detection -----
-    const incomingLower = incoming.toLowerCase();
-    if (
-      incomingLower.includes('cancelar zazil') ||
-      incomingLower.includes('cancelo zazil') ||
-      incomingLower.includes('cancelar plano') ||
-      incomingLower.includes('cancelar assinatura') ||
-      incomingLower.includes('cancel my plan') ||
-      incomingLower.includes('cancel subscription') ||
-      incomingLower.includes('cancel zazil') ||
-      incomingLower.match(/\bcancel\b/)
-    ) {
-      const cancelMsg = replyHelper.cancel(waNumber);
-      res.type('text/xml');
-      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
-    }
-
+    // Use smart intent classification for ALL routing (no more manual cancel matching)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
 
     switch (intent) {
+      case 'CANCEL': {
+        replyObj = replyHelper.cancel(waNumber);
+        break;
+      }
+
       case 'EVENT': {
         const events = await groovooService.getEvents(incoming);
         replyObj = replyHelper.events(events);
