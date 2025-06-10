@@ -2,10 +2,10 @@
 
 const fetch = require('node-fetch');
 
-const API_KEY = process.env.PPLX_API_KEY; // Set this in Render as PPLX_API_KEY!
+const API_KEY = process.env.PPLX_API_KEY; // Set in Render as PPLX_API_KEY!
 const BASE_URL = 'https://api.perplexity.ai/chat/completions';
 
-// Helper to wrap fetch with timeout
+// Helper to wrap fetch with timeout for resilience
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   return Promise.race([
     fetch(url, options),
@@ -27,11 +27,15 @@ async function search(query) {
   }
 
   const body = {
-    model: 'sonar', // Or 'sonar-pro' for higher quality (higher cost)
+    model: 'sonar', // Use 'sonar-pro' for higher quality if you have access
     messages: [
       {
         role: 'system',
-        content: `Você é o Zazil, um assistente brasileiro que sempre responde de forma atualizada e confiável. Use as fontes mais recentes encontradas na web para criar respostas curtas, claras e que incluem nomes e datas sempre que relevante.`
+        content: `
+Você é o Zazil, um assistente brasileiro que sempre responde de forma atualizada, confiável e direta. Use fontes recentes da web para criar respostas curtas, claras e, quando possível, inclua nomes e datas. 
+Se não encontrar resposta, diga claramente: "Não consegui encontrar a resposta exata para isso."
+Responda apenas à pergunta, sem explicações extras.
+        `.trim()
       },
       {
         role: 'user',
@@ -56,7 +60,11 @@ async function search(query) {
     }
 
     const data = await response.json();
-    const answer = data?.choices?.[0]?.message?.content || '';
+    const answer = (data?.choices?.[0]?.message?.content || '').trim();
+    // Fallback for empty replies or "nonsense"
+    if (!answer || answer.length < 8) {
+      return { answer: 'Não consegui encontrar a resposta exata para isso.' };
+    }
     return { answer };
   } catch (err) {
     console.error('[Perplexity] fetch error', err);

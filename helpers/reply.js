@@ -23,7 +23,6 @@ function events(list = []) {
       content: '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!'
     };
   }
-
   const header = '🎉 *Eventos em Destaque:*\n\n';
   const lines = list.map(evt => {
     const date = evt.start_time || '';
@@ -32,7 +31,6 @@ function events(list = []) {
     const url = evt.url || '';
     return `🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
   }).join('\n\n');
-
   return {
     type: 'text',
     content: header + lines
@@ -46,12 +44,9 @@ function news(digest = '') {
       content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
     };
   }
-
   return {
     type: 'text',
-    content: `🗞️ *Resumo de Notícias:*
-
-${digest}`
+    content: `🗞️ *Resumo de Notícias:*\n\n${digest}`
   };
 }
 
@@ -61,23 +56,17 @@ function welcome(waNumber) {
     type: 'text',
     content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
 
-🎉 Você está no período de *teste grátis* do Zazil (7 dias)! Aproveite para experimentar todas as funções.
+Você está no plano *Lite grátis por 7 dias* — pode me mandar até 15 mensagens por dia!
 
-🔔 *Assine o Zazil hoje mesmo!*
-- *Plano Lite*: $4.99/mês, até 15 mensagens/dia
-- *Plano Pro*: $9.99/mês, mensagens ilimitadas
-
-👉 Para assinar ou gerenciar seu plano:
-https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+💡 Se quiser mais liberdade:
+🟢 Assinar Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+🔵 Assinar Pro (mensagens ilimitadas): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
 ❗ *Importante:*
-- Ainda não entendo áudios, só mensagens de texto por enquanto!
-- Tente mandar sua pergunta completa em uma única mensagem.
+- Não entendo áudios ainda;
+- Prefiro que mande sua pergunta completa em uma única mensagem.
 
-Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).
-
-Por agora, aproveite para testar o Zazil de graça por 7 dias. Assina aí, vai! 😄`
+Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
   };
 }
 
@@ -108,14 +97,12 @@ function amazon(items) {
       content: '🔎 Não encontrei produtos relevantes no momento. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
-
   const top = items.map(i => {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
     return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
   }).join('\n\n');
-
   return {
     type: 'text',
     content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`

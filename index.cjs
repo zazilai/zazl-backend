@@ -9,13 +9,14 @@ const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const groovooService = require('./helpers/groovoo');
 const dolarService = require('./helpers/dolar');
+const newsService = require('./helpers/news'); // If you keep for fallback, otherwise remove
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const perplexityService = require('./helpers/perplexity'); // <- Only "search" API for facts/news
+const perplexityService = require('./helpers/perplexity');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -27,14 +28,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 
-// Stripe webhook: must use raw body before json parsers
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
-// Apply body parsers for all remaining routes
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Checkout and management routes
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -70,7 +68,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Cancel intent detection (comprehensive)
+    // ----- CANCEL HANDLING -----
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -103,15 +101,10 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.dolar(rate);
         break;
       }
-      case 'NEWS':
-      case 'GENERIC': {
-        // Both use Perplexity for up-to-date, reliable info
-        const result = await perplexityService.search(incoming);
-        // Defensive: show fallback if API fails
-        replyObj = replyHelper.generic(
-          result.answer ||
-          '🗞️ Desculpe, não consegui encontrar informações atualizadas no momento. Tente de novo mais tarde.'
-        );
+      case 'NEWS': {
+        // Use Perplexity for NEWS as well
+        const { answer } = await perplexityService.search(incoming);
+        replyObj = replyHelper.news(answer && answer.trim() ? answer : 'Não consegui encontrar uma notícia relevante para isso.');
         break;
       }
       case 'AMAZON': {
@@ -119,8 +112,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.amazon(items);
         break;
       }
+      case 'GENERIC': {
+        // Use Perplexity for fact-based/generic
+        const { answer } = await perplexityService.search(incoming);
+        replyObj = replyHelper.generic(answer && answer.trim() ? answer : 
+          'Não consegui encontrar uma resposta exata para isso. Quer tentar perguntar de outra forma?');
+        break;
+      }
       default: {
-        // Fallback to OpenAI for non-news/fact queries
+        // OpenAI fallback (use 'o3' for max cost-efficiency)
         const gpt = await openai.chat.completions.create({
           model: 'o3',
           temperature: 0.7,
@@ -179,6 +179,7 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
       safeContent = replyObj.content;
     } else {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
+      safeContent = 'Não consegui entender ou encontrar resposta. Quer perguntar de outro jeito?';
     }
 
     res.type('text/xml');
@@ -186,7 +187,7 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
     res.type('text/xml');
-    res.send(`<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde.</Message></Response>`);
+    res.send(`<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde ou faça sua pergunta de outra forma.</Message></Response>`);
   }
 });
 
