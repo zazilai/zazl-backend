@@ -56,11 +56,11 @@ function welcome(waNumber) {
     type: 'text',
     content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
 
-Você está no plano *Lite grátis por 7 dias* — pode me mandar até 15 mensagens por dia!
+Você está no *teste grátis do plano Lite* — pode me mandar até 15 mensagens por dia durante 7 dias!
 
-💡 Se quiser mais liberdade:
-🟢 Assinar Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-🔵 Assinar Pro (mensagens ilimitadas): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+💡 Quer continuar? Assine:
+🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
 ❗ *Importante:*
 - Não entendo áudios ainda;
@@ -96,18 +96,19 @@ function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
       type: 'text',
-      content: '🔎 Não encontrei produtos relevantes no momento. Tente buscar de outra forma ou com palavras mais específicas!'
+      content: '🔎 Não encontrei produtos relevantes na Amazon agora. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
+  const dica = "\n\n💡 Dica do Zazil: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";
   const top = items.map(i => {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
-    return `🛒 *${title}*\n💰 ${price}\n🔗 ${url}`;
+    return `🛒 *${title}*\n💰 ${price}\n🔗 [Comprar na Amazon](${url})`;
   }).join('\n\n');
   return {
     type: 'text',
-    content: `✨ *Produtos encontrados na Amazon:*\n\n${top}`
+    content: `✨ *Dica do Zazil: Produtos recomendados na Amazon*\n\n${top}${dica}`
   };
 }
 
