@@ -31,20 +31,30 @@ const functions = [{
 }];
 
 async function classifyIntent(userText) {
-  const response = await openai.chat.completions.create({
-    model: 'o3',
-    temperature: 0,
-    max_completion_tokens: 128, // UPDATED for o3
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userText }
-    ],
-    functions,
-    function_call: { name: 'classify_intent' }
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'o3',
+      max_completion_tokens: 10, // Use only what's needed
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userText }
+      ],
+      functions,
+      function_call: { name: 'classify_intent' }
+    });
 
-  const args = response.choices[0].message.function_call.arguments;
-  return JSON.parse(args).intent.toUpperCase(); // returns 'FX', 'AMAZON', etc.
+    const args = response.choices?.[0]?.message?.function_call?.arguments;
+    if (!args) {
+      console.warn('[classifyIntent] No function_call.arguments returned');
+      return 'GENERIC';
+    }
+    const intent = JSON.parse(args).intent.toUpperCase();
+    console.log('[classifyIntent] intent:', intent);
+    return intent;
+  } catch (err) {
+    console.error('[classifyIntent] error:', err);
+    return 'GENERIC';
+  }
 }
 
 module.exports = classifyIntent;
