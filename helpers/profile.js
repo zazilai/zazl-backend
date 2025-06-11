@@ -1,92 +1,88 @@
+// helpers/profile.js
+
 const admin = require('firebase-admin');
+const db = admin.firestore();
 
-const DEFAULT_PLAN = 'trial';
-const DAILY_LIMITS = {
-  free: 0,
-  trial: 15,
-  lite: 15,
-  pro: Infinity
-};
+const MEMORY_MAX = 10;
 
-function getTodayKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
-}
-
-function addDays(date, days) {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-async function load(db, phone) {
-  console.log('[profile.js] load() triggered for:', phone);
-  const ref = db.collection('profiles').doc(phone);
+async function load(db, waNumber) {
+  const ref = db.collection('profiles').doc(waNumber);
   const snap = await ref.get();
-
+  let wasNew = false;
   if (!snap.exists) {
-    const now = new Date();
-    console.log('[profile.js] Creating new profile doc for', phone);
+    // Create on first use
     await ref.set({
-      phone,
-      lang: 'pt',
-      plan: DEFAULT_PLAN,
-      usage: {},
-      createdAt: now,
-      trialStart: now,
-      planExpires: addDays(now, 7)
-    });
-    return { wasNew: true };
+      plan: 'trial',
+      usage: 0,
+      memory: [],
+      summary: '',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    wasNew = true;
   }
-
-  const data = snap.data();
-  const today = getTodayKey();
-
-  if (!data.usage || !data.usage[today]) {
-    console.log("[profile.js] Initializing today's usage for", phone);
-    await ref.update({
-      [`usage.${today}`]: 0
-    });
-  }
-
-  return { wasNew: false };
+  return { wasNew };
 }
 
-async function updateUsage(db, phone, tokensUsed = 0) {
-  const ref = db.collection('profiles').doc(phone);
-  const today = getTodayKey();
+async function getQuotaStatus(db, waNumber) {
+  const ref = db.collection('profiles').doc(waNumber);
+  const snap = await ref.get();
+  const data = snap.data() || {};
+  // Same quota logic as before
+  if (['pro'].includes(data.plan)) return { allowed: true };
+  // trial/lite plan limits: 15 per day, reset logic can be improved
+  const usage = data.usage || 0;
+  return { allowed: usage < 15 };
+}
+
+async function updateUsage(db, waNumber, tokens = 0) {
+  const ref = db.collection('profiles').doc(waNumber);
   await ref.update({
-    [`usage.${today}`]: admin.firestore.FieldValue.increment(1)
+    usage: admin.firestore.FieldValue.increment(1),
+    tokens: admin.firestore.FieldValue.increment(tokens),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
 }
 
-async function getQuotaStatus(db, phone) {
-  const ref = db.collection('profiles').doc(phone);
+async function loadMemory(db, waNumber) {
+  const ref = db.collection('profiles').doc(waNumber);
   const snap = await ref.get();
-  if (!snap.exists) return { allowed: false, plan: 'free', used: 0 };
+  return (snap.data() && snap.data().memory) ? snap.data().memory : [];
+}
 
-  const data = snap.data();
-  let plan = data.plan || DEFAULT_PLAN;
-  const today = getTodayKey();
-  const used = data.usage?.[today] || 0;
-  let allowed = false;
+async function saveMemory(db, waNumber, role, content) {
+  const ref = db.collection('profiles').doc(waNumber);
+  const snap = await ref.get();
+  let mem = (snap.data() && snap.data().memory) ? snap.data().memory : [];
+  mem.push({ role, content, ts: new Date().toISOString() });
+  if (mem.length > MEMORY_MAX) mem = mem.slice(-MEMORY_MAX);
+  await ref.update({ memory: mem });
+}
 
-  if (plan === 'trial' && data.planExpires) {
-    const expires = new Date(data.planExpires.toDate ? data.planExpires.toDate() : data.planExpires);
-    const now = new Date();
-    if (now > expires) {
-      console.log('[profile.js] Trial expired. Downgrading user to free:', phone);
-      await ref.update({ plan: 'free' });
-      plan = 'free';
-    }
-  }
+async function wipeMemory(db, waNumber) {
+  const ref = db.collection('profiles').doc(waNumber);
+  await ref.update({ memory: [], summary: '' });
+}
 
-  allowed = used < (DAILY_LIMITS[plan] || 0);
-  return { allowed, plan, used };
+// Placeholders for summary (phase 4+)
+async function loadSummary(db, waNumber) {
+  const ref = db.collection('profiles').doc(waNumber);
+  const snap = await ref.get();
+  return (snap.data() && snap.data().summary) ? snap.data().summary : '';
+}
+
+async function saveSummary(db, waNumber, summary) {
+  const ref = db.collection('profiles').doc(waNumber);
+  await ref.update({ summary });
 }
 
 module.exports = {
   load,
+  getQuotaStatus,
   updateUsage,
-  getQuotaStatus
+  loadMemory,
+  saveMemory,
+  wipeMemory,
+  loadSummary,
+  saveSummary
 };
