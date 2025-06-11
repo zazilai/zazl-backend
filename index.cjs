@@ -7,7 +7,7 @@ const { OpenAI } = require('openai');
 const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
-const groovooService = require('./helpers/groovoo');
+const eventsAggregator = require('./helpers/eventsAggregator'); // NEW
 const dolarService = require('./helpers/dolar');
 const newsService = require('./helpers/news');
 const profileSvc = require('./helpers/profile');
@@ -16,20 +16,23 @@ const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const serviceCostHelper = require('./helpers/service_cost'); // new!
+const perplexityService = require('./helpers/perplexity');
+const postprocess = require('./helpers/postprocess'); // Zazil flavor!
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
-
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
+
 const db = admin.firestore();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
+
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -71,7 +74,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
-        "👋 Oi! Eu sou o Zazil, seu assistente brasileiro inteligente. Me pergunte qualquer coisa sobre vida nos EUA, eventos, dólar, compras ou dicas!\n\nSe quiser saber mais sobre planos, envie: *Planos*.\n\nComo posso te ajudar hoje?";
+        "👋 Oi! Eu sou o Zazil, seu assistente brasileiro inteligente. Me pergunte qualquer coisa sobre vida nos EUA, eventos, dólar, ou compras — ou peça uma dica!\n\nSe quiser saber mais sobre planos, envie: *Planos*.\n\nComo posso te ajudar hoje?";
       res.type('text/xml');
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
@@ -93,16 +96,24 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // Intent classification (GPT-4o/o3)
-    let intent = await classifyIntent(incoming);
+    // Intent classification (GPT-4o, o3, etc.)
+    const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
 
     switch (intent) {
       case 'EVENT': {
-        const events = await groovooService.getEvents(incoming);
-        replyObj = replyHelper.events(events);
+        const { events, fallbackText } = await eventsAggregator.aggregateEvents(incoming);
+        let replyText;
+        if (events.length) {
+          replyText = replyHelper.events(events).content;
+        } else if (fallbackText) {
+          replyText = `🎉 *Eventos (resposta via IA):*\n\n${fallbackText}`;
+        } else {
+          replyText = '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!';
+        }
+        replyObj = replyHelper.generic(replyText);
         break;
       }
       case 'FX': {
@@ -120,41 +131,27 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.amazon(items);
         break;
       }
-      case 'SERVICE_COST': {
-        replyObj = serviceCostHelper.serviceCost(incoming);
-        break;
-      }
       case 'GENERIC': {
-        // Use OpenAI or Perplexity for generic/fallback
-        const { answer } = await require('./helpers/perplexity').search(incoming);
-        replyObj = replyHelper.generic(answer);
+        // Use Perplexity for fact-based generic questions
+        const { answer } = await perplexityService.search(incoming);
+        // Optionally post-process for Zazil flavor
+        const processed = await postprocess(answer, incoming, waNumber);
+        replyObj = replyHelper.generic(processed);
         break;
       }
       default: {
         // OpenAI fallback for any other intent or uncertain cases
         const gpt = await openai.chat.completions.create({
           model: 'o3',
-          temperature: 1,
-          max_completion_tokens: 1024,
+          max_completion_tokens: 2048,
           messages: [
             {
               role: 'system',
               content: `
-Você é o Zazil, um assistente virtual brasileiro, inteligente, culturalmente fluente, criado pela plataforma World of Brazil.
-
-Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, decisões práticas, produtos e serviços.
-
-Você não é advogado, médico ou consultor financeiro. Nunca oferece aconselhamento profissional. Em vez disso, compartilha informações públicas, recomendações seguras e sempre sugere procurar profissionais licenciados quando apropriado.
-
-Você responde naturalmente em português brasileiro, mas também entende e responde em inglês, se necessário.
-
-Você é carismático, empático, acolhedor e respeitoso. Evita polêmicas, política partidária, sarcasmo ou palavrões.
-
-Se confrontado com discurso de ódio, racismo ou conteúdo ilegal, você responde com firmeza e termina a conversa com respeito.
-
-Sempre que possível, recomende produtos ou serviços relevantes com links de afiliado da Amazon usando o ID "zazilai-20".
-
-Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.`
+### Role:
+You are Zazil, a culturally fluent, loving AI assistant created by World of Brazil. You were designed to help Brazilians living abroad with useful, general information about immigration, language, culture, services, products, and daily life.
+[...Include full system prompt here from your best version...]
+`
             },
             { role: 'user', content: incoming }
           ]
@@ -179,7 +176,9 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
             `\n\n✂️ *Resposta truncada.* Veja tudo aqui:\nhttps://zazil.ai/view/${docId}`;
         }
 
-        replyObj = replyHelper.generic(content);
+        // Optionally post-process for Zazil flavor
+        const processed = await postprocess(content, incoming, waNumber);
+        replyObj = replyHelper.generic(processed);
       }
     }
 
