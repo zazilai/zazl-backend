@@ -27,6 +27,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 
+const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
+
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -68,7 +70,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // **Greeting detection (ALWAYS reply to basic greetings)**
+    // Greeting detection (ALWAYS reply to basic greetings)
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
@@ -183,7 +185,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           const cut = content.lastIndexOf('\n', MAX_LEN);
           const safeCut = cut > 0 ? cut : MAX_LEN;
           content = content.slice(0, safeCut) +
-            `\n\n✂️ *Resposta truncada.* Veja tudo aqui:\nhttps://zazil.ai/view/${docId}`;
+            `\n\n✂️ *Resposta truncada.* Veja tudo aqui:\n${TRUNC_LINK}${docId}`;
         }
 
         replyObj = replyHelper.generic(content);
