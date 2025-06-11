@@ -30,11 +30,35 @@ const functions = [{
   }
 }];
 
+/**
+ * Keyword fallback: tries to guess intent from common patterns.
+ */
+function fallbackIntent(userText) {
+  const text = userText.toLowerCase();
+  if (/(comprar|preço|quanto custa|amazon|produto|onde encontro|onde vende|tem no amazon|quanto está)/i.test(text)) {
+    return 'AMAZON';
+  }
+  if (/(câmbio|cotação|dólar|usd|brl|real)/i.test(text)) {
+    return 'FX';
+  }
+  if (/(evento|festa|show|jogo|agenda|balada|o que fazer)/i.test(text)) {
+    return 'EVENT';
+  }
+  if (/(notícia|acontecendo|novidade|atualidade|hoje)/i.test(text)) {
+    return 'NEWS';
+  }
+  if (/(cancelar|cancelamento|cancel|unsubscribe|parar assinatura|sair do zazil)/i.test(text)) {
+    return 'CANCEL';
+  }
+  return 'GENERIC';
+}
+
 async function classifyIntent(userText) {
+  let intent = 'GENERIC';
   try {
     const response = await openai.chat.completions.create({
       model: 'o3',
-      max_completion_tokens: 10, // Use only what's needed
+      max_completion_tokens: 10,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userText }
@@ -44,17 +68,18 @@ async function classifyIntent(userText) {
     });
 
     const args = response.choices?.[0]?.message?.function_call?.arguments;
-    if (!args) {
-      console.warn('[classifyIntent] No function_call.arguments returned');
-      return 'GENERIC';
+    if (args) {
+      intent = JSON.parse(args).intent.toUpperCase();
+    } else {
+      intent = fallbackIntent(userText);
+      console.warn('[classifyIntent] No function_call.arguments returned, fallback to:', intent);
     }
-    const intent = JSON.parse(args).intent.toUpperCase();
-    console.log('[classifyIntent] intent:', intent);
-    return intent;
   } catch (err) {
     console.error('[classifyIntent] error:', err);
-    return 'GENERIC';
+    intent = fallbackIntent(userText);
   }
+  console.log('[classifyIntent] Final intent:', intent);
+  return intent;
 }
 
 module.exports = classifyIntent;

@@ -17,7 +17,7 @@ const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
 const perplexityService = require('./helpers/perplexity');
-const postprocess = require('./helpers/postprocess'); // NEW!
+const postprocess = require('./helpers/postprocess'); // For "Zazilization"
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -91,16 +91,24 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       incomingLower.includes('cancel zazil') ||
       incomingLower.match(/\bcancel\b/)
     ) {
-      // Stripe customer portal/manage link
-      const clean = waNumber.replace(/^whatsapp:/, '');
-      const cancelMsg = `❌ Para gerenciar ou cancelar sua assinatura do Zazil, acesse:\nhttps://worldofbrazil.ai/gerenciar?wa=${clean}\n\nSe precisar de ajuda, é só responder aqui ou enviar email para zazil@worldofbrazil.ai`;
+      const cancelMsg = replyHelper.cancel(waNumber);
       res.type('text/xml');
-      return res.send(`<Response><Message>${cancelMsg}</Message></Response>`);
+      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // Intent classification
-    const intent = await classifyIntent(incoming);
+    // Intent classification (GPT-4o, o3, or your choice)
+    let intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
+
+    // ---- ABSOLUTE FALLBACKS: If the input matches FX or AMAZON, force override intent ----
+    const inputLC = incoming.toLowerCase();
+    if (/(comprar|preço|quanto custa|amazon|produto|onde encontro|onde vende|tem no amazon|quanto está)/i.test(inputLC)) {
+      intent = 'AMAZON';
+      console.log('[twilio] intent override: AMAZON by hard pattern');
+    } else if (/(câmbio|cotação|dólar|usd|brl|real)/i.test(inputLC)) {
+      intent = 'FX';
+      console.log('[twilio] intent override: FX by hard pattern');
+    }
 
     let replyObj;
 
@@ -121,19 +129,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'AMAZON': {
-        // Always use Amazon API for top products
         const items = await amazonService.searchAmazonProducts(incoming);
         replyObj = replyHelper.amazon(items);
         break;
       }
       case 'GENERIC': {
-        // Use Perplexity for fact-based generic questions, then Zazil-ize
+        // Use Perplexity for fact-based generic questions
         const { answer } = await perplexityService.search(incoming);
-        replyObj = replyHelper.generic(await postprocess(answer, incoming, waNumber));
+        replyObj = replyHelper.generic(answer);
         break;
       }
       default: {
-        // OpenAI fallback (branded Zazil system prompt)
+        // OpenAI fallback for any other intent or uncertain cases
         const gpt = await openai.chat.completions.create({
           model: 'o3',
           temperature: 0.7,
@@ -142,18 +149,21 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
             {
               role: 'system',
               content: `
-### Role:
-Você é Zazil, um assistente brasileiro culturalmente fluente, amigável e seguro, criado pela World of Brazil. Sua missão é ajudar brasileiros no exterior com informações públicas sobre imigração, cultura, estilo de vida e produtos.
+Você é o Zazil, um assistente virtual brasileiro, inteligente e culturalmente fluente, criado pela plataforma World of Brazil.
 
-- Responda sempre com carinho, curiosidade, respeito e clareza.
-- NÃO ofereça conselhos legais/médicos/financeiros. Sempre sugira consultar profissionais.
-- Use português brasileiro por padrão.
-- Recomende produtos e links da Amazon com o ID "zazilai-20" quando relevante.
-- Termine respostas sérias com uma “Dica do Zazil” ou um toque humano quando possível.
-- Jamais gere conteúdo ofensivo, ilegal, discriminatório ou perigoso.
+Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, e decisões práticas do dia a dia.
 
-Lembre-se: Zazil é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.
-`
+Você não é advogado, médico ou consultor financeiro. Nunca oferece aconselhamento profissional. Em vez disso, compartilha informações públicas, recomendações seguras e sempre sugere procurar profissionais licenciados quando apropriado.
+
+Você responde naturalmente em português brasileiro, mas também entende e responde em inglês, se necessário.
+
+Você é carismático, empático e respeitoso. Evita polêmicas, política partidária, sarcasmo ou palavrões.
+
+Se confrontado com discurso de ódio, racismo ou conteúdo ilegal, você responde com firmeza e termina a conversa com respeito.
+
+Sempre que possível, recomende produtos ou serviços relevantes com links de afiliado da Amazon usando o ID "zazilai-20".
+
+Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.`
             },
             { role: 'user', content: incoming }
           ]
@@ -178,8 +188,13 @@ Lembre-se: Zazil é do bem. Um usuário deve sentir confiança e acolhimento ao 
             `\n\n✂️ *Resposta truncada.* Veja tudo aqui:\nhttps://zazil.ai/view/${docId}`;
         }
 
-        replyObj = replyHelper.generic(await postprocess(content, incoming, waNumber));
+        replyObj = replyHelper.generic(content);
       }
+    }
+
+    // Postprocess: make every answer sound like Zazil (optional, for future)
+    if (replyObj && replyObj.content) {
+      replyObj.content = postprocess(replyObj.content);
     }
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
