@@ -1,88 +1,70 @@
 // helpers/profile.js
 
-const admin = require('firebase-admin');
+const { admin } = require('./firebase');
 const db = admin.firestore();
 
-const MEMORY_MAX = 10;
-
+// Loads user profile or creates it if new; tracks trial status.
 async function load(db, waNumber) {
-  const ref = db.collection('profiles').doc(waNumber);
-  const snap = await ref.get();
+  const doc = db.collection('profiles').doc(waNumber);
   let wasNew = false;
+  const snap = await doc.get();
   if (!snap.exists) {
-    // Create on first use
-    await ref.set({
+    // New user, create basic profile with trial
+    await doc.set({
       plan: 'trial',
-      usage: 0,
-      memory: [],
-      summary: '',
+      usage: {},
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      trialStart: admin.firestore.FieldValue.serverTimestamp()
+    });
     wasNew = true;
   }
   return { wasNew };
 }
 
 async function getQuotaStatus(db, waNumber) {
-  const ref = db.collection('profiles').doc(waNumber);
-  const snap = await ref.get();
-  const data = snap.data() || {};
-  // Same quota logic as before
-  if (['pro'].includes(data.plan)) return { allowed: true };
-  // trial/lite plan limits: 15 per day, reset logic can be improved
-  const usage = data.usage || 0;
-  return { allowed: usage < 15 };
+  const doc = db.collection('profiles').doc(waNumber);
+  const snap = await doc.get();
+  if (!snap.exists) {
+    return { allowed: true, plan: 'trial', used: 0, limit: 15 };
+  }
+  const data = snap.data();
+  let plan = data.plan || 'trial';
+  let used = (data.usage && data.usage[getToday()]) || 0;
+  let limit = plan === 'pro' ? 99999 : 15;
+  if (plan === 'free') limit = 10;
+  if (plan === 'trial') limit = 15;
+  return {
+    allowed: used < limit,
+    plan,
+    used,
+    limit
+  };
 }
 
-async function updateUsage(db, waNumber, tokens = 0) {
-  const ref = db.collection('profiles').doc(waNumber);
-  await ref.update({
-    usage: admin.firestore.FieldValue.increment(1),
-    tokens: admin.firestore.FieldValue.increment(tokens),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
+async function updateUsage(db, waNumber, tokens) {
+  const doc = db.collection('profiles').doc(waNumber);
+  const snap = await doc.get();
+  if (!snap.exists) return;
+  const data = snap.data();
+  const usage = data.usage || {};
+  const today = getToday();
+  usage[today] = (usage[today] || 0) + 1;
+  await doc.set(
+    {
+      usage,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
 }
 
-async function loadMemory(db, waNumber) {
-  const ref = db.collection('profiles').doc(waNumber);
-  const snap = await ref.get();
-  return (snap.data() && snap.data().memory) ? snap.data().memory : [];
-}
-
-async function saveMemory(db, waNumber, role, content) {
-  const ref = db.collection('profiles').doc(waNumber);
-  const snap = await ref.get();
-  let mem = (snap.data() && snap.data().memory) ? snap.data().memory : [];
-  mem.push({ role, content, ts: new Date().toISOString() });
-  if (mem.length > MEMORY_MAX) mem = mem.slice(-MEMORY_MAX);
-  await ref.update({ memory: mem });
-}
-
-async function wipeMemory(db, waNumber) {
-  const ref = db.collection('profiles').doc(waNumber);
-  await ref.update({ memory: [], summary: '' });
-}
-
-// Placeholders for summary (phase 4+)
-async function loadSummary(db, waNumber) {
-  const ref = db.collection('profiles').doc(waNumber);
-  const snap = await ref.get();
-  return (snap.data() && snap.data().summary) ? snap.data().summary : '';
-}
-
-async function saveSummary(db, waNumber, summary) {
-  const ref = db.collection('profiles').doc(waNumber);
-  await ref.update({ summary });
+function getToday() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 module.exports = {
   load,
   getQuotaStatus,
-  updateUsage,
-  loadMemory,
-  saveMemory,
-  wipeMemory,
-  loadSummary,
-  saveSummary
+  updateUsage
 };

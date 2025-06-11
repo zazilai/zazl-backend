@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const admin = require('firebase-admin');
+const { admin } = require('./helpers/firebase');
 const { OpenAI } = require('openai');
 
 const classifyIntent = require('./helpers/classifyIntent');
@@ -17,12 +17,7 @@ const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
 const perplexityService = require('./helpers/perplexity');
-const memoryHelper = require('./helpers/memory');   // <-- NEW!
-
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+const postprocess = require('./helpers/postprocess'); // Optional, for final “Zazilizing” answers
 
 const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -70,7 +65,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Greeting detection (ALWAYS reply to basic greetings)
+    // **Greeting detection (ALWAYS reply to basic greetings)**
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
@@ -96,25 +91,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // -------- MEMORY: Load, Update, and Store User Summary -----------
-    let userSummary = '';
-    const profileDoc = await db.collection('profiles').doc(waNumber).get();
-    userSummary = profileDoc.data()?.summary || '';
-
-    // Update memory with the new message
-    userSummary = await memoryHelper.updateUserSummary(userSummary, incoming);
-    await db.collection('profiles').doc(waNumber).set({ summary: userSummary }, { merge: true });
-
-    // Intent classification
+    // Intent classification (GPT-4o, o3, or your choice)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
-
-    // Inject memory summary into the system prompt for all LLM calls
-    const memoryBlock = userSummary
-      ? `\n### DADOS RELEVANTES SOBRE O USUÁRIO:\n${userSummary}\n`
-      : '';
 
     switch (intent) {
       case 'EVENT': {
@@ -152,7 +133,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           messages: [
             {
               role: 'system',
-              content: memoryBlock + `
+              content: `
 Você é o Zazil, um assistente virtual brasileiro, inteligente e culturalmente fluente, criado pela plataforma World of Brazil.
 
 Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, e decisões práticas do dia a dia.
@@ -195,6 +176,9 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
         replyObj = replyHelper.generic(content);
       }
     }
+
+    // Final Zazil-style polish if you use postprocess.js (optional, remove if not needed)
+    // replyObj.content = await postprocess(replyObj.content, incoming, waNumber);
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
