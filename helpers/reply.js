@@ -85,8 +85,10 @@ function cancel(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
-    content: `❌ Para gerenciar ou cancelar sua assinatura, acesse:
-https://zazl-backend.onrender.com/gerenciar?wa=${clean}`
+    content: `❌ Para gerenciar ou cancelar sua assinatura do Zazil, basta acessar:
+https://worldofbrazil.ai/gerenciar?wa=${clean}
+
+Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@worldofbrazil.ai`
   };
 }
 
