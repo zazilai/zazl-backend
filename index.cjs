@@ -16,7 +16,7 @@ const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const perplexityService = require('./helpers/perplexity'); // For real-time search
+const perplexityService = require('./helpers/perplexity'); // for fact-based/generic
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -51,15 +51,13 @@ app.get('/api/dolar', async (req, res) => {
   }
 });
 
-// ===== MAIN WHATSAPP HANDLER (GREAT PRODUCT) =====
-
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
-    // Onboarding for first-time users
+    // Onboarding for new users
     const { wasNew } = await profileSvc.load(db, waNumber);
     if (wasNew) {
       const welcomeMsg = replyHelper.welcome(waNumber);
@@ -67,7 +65,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
-    // Enforce message quota (upgrade if exceeded)
+    // Plan limit check
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const upgradeMsg = replyHelper.upgrade(waNumber);
@@ -75,8 +73,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // ---- 1. EARLY CANCEL HANDLER ----
-    // Always intercept cancel/cancelar phrases BEFORE intent classification!
+    // Cancelation phrase (ALWAYS before intent classification)
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -93,13 +90,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // ---- 2. INTENT CLASSIFICATION ----
+    // Intent classification
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
 
-    // ---- 3. INTENT HANDLING ----
     switch (intent) {
       case 'EVENT': {
         const events = await groovooService.getEvents(incoming);
@@ -112,9 +108,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'NEWS': {
-        // Use Perplexity for up-to-date, fact-based answers
-        const { answer } = await perplexityService.search(incoming);
-        replyObj = replyHelper.news(answer);
+        const digest = await newsService.getDigest(incoming);
+        replyObj = replyHelper.news(digest);
         break;
       }
       case 'AMAZON': {
@@ -123,17 +118,17 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'GENERIC': {
-        // Use Perplexity for most generic/factual queries
+        // Use Perplexity for fact-based generic questions
         const { answer } = await perplexityService.search(incoming);
         replyObj = replyHelper.generic(answer);
         break;
       }
       default: {
-        // Fallback: classic OpenAI for personality, non-factual, or “edge” cases
+        // OpenAI fallback for any other intent or uncertain cases
         const gpt = await openai.chat.completions.create({
-          model: 'o3', // Using latest o3 (cheaper & smart)
+          model: 'o3',
           temperature: 0.7,
-          max_tokens: 2048,
+          max_completion_tokens: 2048, // o3 correct param!
           messages: [
             {
               role: 'system',
@@ -160,7 +155,7 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
 
         let content = gpt.choices?.[0]?.message?.content || '';
 
-        // Long answer? Save in Firestore, reply with short + link.
+        // Save response to Firestore for truncation/view links
         const docRef = await db.collection('responses').add({
           user: waNumber,
           prompt: incoming,
@@ -181,7 +176,6 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
       }
     }
 
-    // Track usage in Firestore
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
     let safeContent = 'Desculpe, não consegui entender.';
