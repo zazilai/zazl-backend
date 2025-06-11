@@ -16,19 +16,17 @@ const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const perplexityService = require('./helpers/perplexity');
-const postprocess = require('./helpers/postprocess');
+const serviceCostHelper = require('./helpers/service_cost'); // new!
 
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
-
 const db = admin.firestore();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
-
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -69,16 +67,16 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Greeting detection (ALWAYS reply to basic greetings)
+    // **Greeting detection (ALWAYS reply to basic greetings)**
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
-        "👋 Oi! Eu sou o Zazil, seu assistente brasileiro inteligente. Me pergunte qualquer coisa sobre vida nos EUA, eventos, dólar, ou compras — ou peça uma dica!\n\nSe quiser saber mais sobre planos, envie: *Planos*.\n\nComo posso te ajudar hoje?";
+        "👋 Oi! Eu sou o Zazil, seu assistente brasileiro inteligente. Me pergunte qualquer coisa sobre vida nos EUA, eventos, dólar, compras ou dicas!\n\nSe quiser saber mais sobre planos, envie: *Planos*.\n\nComo posso te ajudar hoje?";
       res.type('text/xml');
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // Cancelation phrase (ALWAYS before intent classification)
+    // Cancelation phrase (before intent classification)
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -95,8 +93,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // Intent classification (robust)
-    const intent = await classifyIntent(incoming);
+    // Intent classification (GPT-4o/o3)
+    let intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
@@ -122,9 +120,13 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.amazon(items);
         break;
       }
+      case 'SERVICE_COST': {
+        replyObj = serviceCostHelper.serviceCost(incoming);
+        break;
+      }
       case 'GENERIC': {
-        // Use Perplexity for fact-based generic questions
-        const { answer } = await perplexityService.search(incoming);
+        // Use OpenAI or Perplexity for generic/fallback
+        const { answer } = await require('./helpers/perplexity').search(incoming);
         replyObj = replyHelper.generic(answer);
         break;
       }
@@ -132,20 +134,21 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         // OpenAI fallback for any other intent or uncertain cases
         const gpt = await openai.chat.completions.create({
           model: 'o3',
-          max_completion_tokens: 2048,
+          temperature: 1,
+          max_completion_tokens: 1024,
           messages: [
             {
               role: 'system',
               content: `
-Você é o Zazil, um assistente virtual brasileiro, inteligente e culturalmente fluente, criado pela plataforma World of Brazil.
+Você é o Zazil, um assistente virtual brasileiro, inteligente, culturalmente fluente, criado pela plataforma World of Brazil.
 
-Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, e decisões práticas do dia a dia.
+Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, decisões práticas, produtos e serviços.
 
 Você não é advogado, médico ou consultor financeiro. Nunca oferece aconselhamento profissional. Em vez disso, compartilha informações públicas, recomendações seguras e sempre sugere procurar profissionais licenciados quando apropriado.
 
 Você responde naturalmente em português brasileiro, mas também entende e responde em inglês, se necessário.
 
-Você é carismático, empático e respeitoso. Evita polêmicas, política partidária, sarcasmo ou palavrões.
+Você é carismático, empático, acolhedor e respeitoso. Evita polêmicas, política partidária, sarcasmo ou palavrões.
 
 Se confrontado com discurso de ódio, racismo ou conteúdo ilegal, você responde com firmeza e termina a conversa com respeito.
 
@@ -179,9 +182,6 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
         replyObj = replyHelper.generic(content);
       }
     }
-
-    // ALWAYS postprocess before sending!
-    replyObj = postprocess(replyObj, incoming, intent);
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 

@@ -4,14 +4,45 @@ const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `
-Você é um classificador de intenção. Classifique a mensagem do usuário em uma das seguintes categorias:
+Você é um classificador de intenção para o assistente Zazil.
 
-- fx: se estiver perguntando sobre câmbio, dólar, valor financeiro, ou comparação com real
-- event: se estiver perguntando o que fazer, eventos, jogos, shows, festas ou planos locais
-- news: se estiver perguntando o que está acontecendo no mundo, no Brasil ou atualidades
-- amazon: se estiver perguntando onde comprar, quanto custa, ou pedindo recomendações de produtos (raquete, panela, tênis, Alexa, etc)
-- cancel: se estiver tentando cancelar, sair ou encerrar o plano do Zazil
-- generic: se for qualquer outra coisa, como perguntas gerais, tradução, conselhos, curiosidades ou piadas
+Classifique a mensagem do usuário em UMA destas categorias:
+
+- fx: Perguntas sobre câmbio, dólar, valor do real/dólar, ou envio de dinheiro.
+- event: Perguntas sobre eventos, festas, shows, esportes, datas de jogos, o que fazer, etc.
+- news: Perguntas sobre notícias, atualidades, o que está acontecendo, novidades.
+- amazon: Perguntas sobre produtos físicos, onde comprar, quanto custa um produto, recomendações de itens para comprar, por exemplo: raquete, panela, Alexa, celular, brinquedo, etc.
+- service_cost: Perguntas sobre preço/custo de serviços ou mão de obra, como manutenção, instalação, trocar peças de carro, conserto, limpeza, dentista, cortar cabelo, etc.
+- cancel: Se estiver tentando cancelar ou encerrar o plano do Zazil, cancelar assinatura.
+- generic: Qualquer outra coisa (traduções, conselhos, curiosidades, piadas, dúvidas gerais).
+
+Exemplos:
+Q: "Quanto custa uma raquete de tênis?"
+A: amazon
+
+Q: "Onde posso comprar uma panela elétrica nos EUA?"
+A: amazon
+
+Q: "Qual o preço médio para trocar o freio de uma Suburban?"
+A: service_cost
+
+Q: "Quanto custa um corte de cabelo em Miami?"
+A: service_cost
+
+Q: "Qual a cotação do dólar?"
+A: fx
+
+Q: "Como cancelo minha assinatura do Zazil?"
+A: cancel
+
+Q: "Quando a seleção brasileira joga?"
+A: event
+
+Q: "Quais as notícias de hoje no Brasil?"
+A: news
+
+Q: "Me conte uma curiosidade sobre a Flórida."
+A: generic
 `;
 
 const functions = [{
@@ -22,7 +53,7 @@ const functions = [{
     properties: {
       intent: {
         type: 'string',
-        enum: ['fx', 'event', 'news', 'cancel', 'amazon', 'generic'],
+        enum: ['fx', 'event', 'news', 'cancel', 'amazon', 'service_cost', 'generic'],
         description: 'A intenção principal da mensagem do usuário'
       }
     },
@@ -30,31 +61,7 @@ const functions = [{
   }
 }];
 
-/**
- * Keyword fallback: tries to guess intent from common patterns.
- */
-function fallbackIntent(userText) {
-  const text = userText.toLowerCase();
-  if (/(comprar|preço|quanto custa|amazon|produto|onde encontro|onde vende|tem no amazon|quanto está)/i.test(text)) {
-    return 'AMAZON';
-  }
-  if (/(câmbio|cotação|dólar|usd|brl|real)/i.test(text)) {
-    return 'FX';
-  }
-  if (/(evento|festa|show|jogo|agenda|balada|o que fazer)/i.test(text)) {
-    return 'EVENT';
-  }
-  if (/(notícia|acontecendo|novidade|atualidade|hoje)/i.test(text)) {
-    return 'NEWS';
-  }
-  if (/(cancelar|cancelamento|cancel|unsubscribe|parar assinatura|sair do zazil)/i.test(text)) {
-    return 'CANCEL';
-  }
-  return 'GENERIC';
-}
-
 async function classifyIntent(userText) {
-  let intent = 'GENERIC';
   try {
     const response = await openai.chat.completions.create({
       model: 'o3',
@@ -68,18 +75,24 @@ async function classifyIntent(userText) {
     });
 
     const args = response.choices?.[0]?.message?.function_call?.arguments;
-    if (args) {
-      intent = JSON.parse(args).intent.toUpperCase();
-    } else {
-      intent = fallbackIntent(userText);
-      console.warn('[classifyIntent] No function_call.arguments returned, fallback to:', intent);
+    if (!args) {
+      // Soft fallback: keyword override (for critical intents only)
+      const q = userText.toLowerCase();
+      if (/cancel/.test(q)) return 'CANCEL';
+      if (/dólar|cotação|usd|dollar/.test(q)) return 'FX';
+      if (/comprar|produto|raquete|panela|onde encontro|amazon/.test(q)) return 'AMAZON';
+      if (/preço|custa|serviço|conserto|trocar|instalar|manutenção|mão de obra|cortar cabelo/.test(q)) return 'SERVICE_COST';
+      if (/evento|jogo|show|festa|acontece/.test(q)) return 'EVENT';
+      if (/notícia|acontecendo|atualidades/.test(q)) return 'NEWS';
+      return 'GENERIC';
     }
+    const intent = JSON.parse(args).intent.toUpperCase();
+    console.log('[classifyIntent] intent:', intent);
+    return intent;
   } catch (err) {
     console.error('[classifyIntent] error:', err);
-    intent = fallbackIntent(userText);
+    return 'GENERIC';
   }
-  console.log('[classifyIntent] Final intent:', intent);
-  return intent;
 }
 
 module.exports = classifyIntent;
