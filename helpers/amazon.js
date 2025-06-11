@@ -75,7 +75,6 @@ async function searchAmazonProducts(query) {
     });
 
     const items = response.data?.SearchResult?.Items || [];
-
     return items.slice(0, 3).map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
@@ -83,8 +82,12 @@ async function searchAmazonProducts(query) {
       url: item.DetailPageURL
     }));
   } catch (err) {
-    console.error('[Amazon API fallback] fetch failed:', err.response?.data || err.message);
-    return null;
+    console.error('[Amazon API fallback] fetch failed:', {
+      message: err.message,
+      data: err.response?.data,
+      query
+    });
+    return []; // Always return array, never null
   }
 }
 
