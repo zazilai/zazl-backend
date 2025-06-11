@@ -1,4 +1,6 @@
-export default `
+// zazilPrompt.js
+
+const ZAZIL_PROMPT = `
 ################################################################
 # ZAZIL – MASTER SYSTEM PROMPT (May 2025 – v1.2)
 ################################################################
@@ -86,3 +88,5 @@ Respond with light stats *and* cultural nuance. If asked “qual o maior clube?�
 END OF SYSTEM PROMPT
 ################################################################
 `;
+
+module.exports = ZAZIL_PROMPT;

@@ -7,7 +7,7 @@ const { OpenAI } = require('openai');
 const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
-const groovooService = require('./helpers/groovoo');
+const eventsAggregator = require('./helpers/eventsAggregator');
 const dolarService = require('./helpers/dolar');
 const newsService = require('./helpers/news');
 const profileSvc = require('./helpers/profile');
@@ -17,7 +17,10 @@ const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
 const perplexityService = require('./helpers/perplexity');
-const postprocess = require('./helpers/postprocess'); // Optional, for final “Zazilizing” answers
+const postprocess = require('./helpers/postprocess');
+const memorySvc = require('./helpers/memory');
+const serviceCost = require('./helpers/service_cost');
+const ZAZIL_PROMPT = require('./zazilPrompt');
 
 const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -91,6 +94,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
+    // Load previous memory for prompt context (optional, scalable)
+    let memorySummary = '';
+    try {
+      const profileDoc = await db.collection('profiles').doc(waNumber).get();
+      memorySummary = profileDoc.exists ? (profileDoc.data().memory || '') : '';
+    } catch (e) {
+      memorySummary = '';
+    }
+
     // Intent classification (GPT-4o, o3, or your choice)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
@@ -99,8 +111,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     switch (intent) {
       case 'EVENT': {
-        const events = await groovooService.getEvents(incoming);
-        replyObj = replyHelper.events(events);
+        // Aggregate events from Groovoo, Ticketmaster, fallback to Perplexity if empty
+        const { events, fallbackText } = await eventsAggregator.aggregateEvents(incoming);
+        if (events && events.length > 0) {
+          replyObj = replyHelper.events(events);
+        } else if (fallbackText) {
+          replyObj = replyHelper.generic(fallbackText);
+        } else {
+          replyObj = replyHelper.events([]);
+        }
         break;
       }
       case 'FX': {
@@ -118,6 +137,10 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         replyObj = replyHelper.amazon(items);
         break;
       }
+      case 'SERVICE_COST': {
+        replyObj = serviceCost.serviceCost(incoming);
+        break;
+      }
       case 'GENERIC': {
         // Use Perplexity for fact-based generic questions
         const { answer } = await perplexityService.search(incoming);
@@ -126,6 +149,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
       default: {
         // OpenAI fallback for any other intent or uncertain cases
+        // —> inject memory/context if available
+        let userPrompt = incoming;
+        if (memorySummary && memorySummary.trim().length > 0) {
+          userPrompt = `[DADOS DO USUÁRIO ATÉ AGORA]:\n${memorySummary}\n\n[PERGUNTA]:\n${incoming}`;
+        }
         const gpt = await openai.chat.completions.create({
           model: 'o3',
           temperature: 1,
@@ -133,24 +161,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           messages: [
             {
               role: 'system',
-              content: `
-Você é o Zazil, um assistente virtual brasileiro, inteligente e culturalmente fluente, criado pela plataforma World of Brazil.
-
-Seu papel é ajudar brasileiros que vivem no exterior — ou no Brasil — com informações úteis e confiáveis sobre imigração, traduções, cultura americana, burocracia, estilo de vida, compras, e decisões práticas do dia a dia.
-
-Você não é advogado, médico ou consultor financeiro. Nunca oferece aconselhamento profissional. Em vez disso, compartilha informações públicas, recomendações seguras e sempre sugere procurar profissionais licenciados quando apropriado.
-
-Você responde naturalmente em português brasileiro, mas também entende e responde em inglês, se necessário.
-
-Você é carismático, empático e respeitoso. Evita polêmicas, política partidária, sarcasmo ou palavrões.
-
-Se confrontado com discurso de ódio, racismo ou conteúdo ilegal, você responde com firmeza e termina a conversa com respeito.
-
-Sempre que possível, recomende produtos ou serviços relevantes com links de afiliado da Amazon usando o ID "zazilai-20".
-
-Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao falar com você.`
+              content: ZAZIL_PROMPT
             },
-            { role: 'user', content: incoming }
+            { role: 'user', content: userPrompt }
           ]
         });
 
@@ -177,10 +190,27 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
       }
     }
 
-    // Final Zazil-style polish if you use postprocess.js (optional, remove if not needed)
-    // replyObj.content = await postprocess(replyObj.content, incoming, waNumber);
+    // Run postprocess for generic/news only
+    replyObj = postprocess(replyObj, incoming, intent);
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
+
+    // ——— MEMORY UPDATE (async, non-blocking) ———
+    if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
+      try {
+        const profileDoc = db.collection('profiles').doc(waNumber);
+        const old = memorySummary || '';
+        memorySvc
+          .updateUserSummary(old, incoming)
+          .then(summary => {
+            if (summary && summary !== old) {
+              profileDoc.set({ memory: summary }, { merge: true });
+            }
+          });
+      } catch (e) {
+        // Fail silently, memory is non-blocking
+      }
+    }
 
     let safeContent = 'Desculpe, não consegui entender.';
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
