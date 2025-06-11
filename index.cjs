@@ -16,7 +16,7 @@ const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const perplexityService = require('./helpers/perplexity'); // for fact-based/generic
+const perplexityService = require('./helpers/perplexity');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -28,14 +28,10 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 
-// Stripe webhook: must use raw body before json parsers
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
-
-// Apply body parsers for all remaining routes
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Checkout and management routes
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -73,7 +69,17 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Cancelation phrase (ALWAYS before intent classification)
+    // **Greeting detection (ALWAYS reply to basic greetings)**
+    const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
+    if (greetingRegex.test(incoming)) {
+      const name = waNumber.slice(-4); // Optionally, a friendly code
+      const greetReply =
+        "👋 Oi! Eu sou o Zazil, seu assistente brasileiro inteligente. Me pergunte qualquer coisa sobre vida nos EUA, eventos, dólar, ou compras — ou peça uma dica!\n\nSe quiser saber mais sobre planos, envie: *Planos*.\n\nComo posso te ajudar hoje?";
+      res.type('text/xml');
+      return res.send(`<Response><Message>${greetReply}</Message></Response>`);
+    }
+
+    // Cancelation phrase (before intent classification)
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -90,7 +96,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // Intent classification
+    // Intent classification (GPT-4o, o3, or your choice)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
@@ -128,7 +134,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         const gpt = await openai.chat.completions.create({
           model: 'o3',
           temperature: 0.7,
-          max_completion_tokens: 2048, // o3 correct param!
+          max_completion_tokens: 2048,
           messages: [
             {
               role: 'system',
