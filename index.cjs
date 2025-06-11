@@ -17,7 +17,7 @@ const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
 const perplexityService = require('./helpers/perplexity');
-const postprocess = require('./helpers/postprocess'); // For "Zazilization"
+const postprocess = require('./helpers/postprocess');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -32,7 +32,6 @@ const app = express();
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -79,7 +78,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // Cancelation phrase (before intent classification)
+    // Cancelation phrase (ALWAYS before intent classification)
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -96,19 +95,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // Intent classification (GPT-4o, o3, or your choice)
-    let intent = await classifyIntent(incoming);
+    // Intent classification (robust)
+    const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
-
-    // ---- ABSOLUTE FALLBACKS: If the input matches FX or AMAZON, force override intent ----
-    const inputLC = incoming.toLowerCase();
-    if (/(comprar|preço|quanto custa|amazon|produto|onde encontro|onde vende|tem no amazon|quanto está)/i.test(inputLC)) {
-      intent = 'AMAZON';
-      console.log('[twilio] intent override: AMAZON by hard pattern');
-    } else if (/(câmbio|cotação|dólar|usd|brl|real)/i.test(inputLC)) {
-      intent = 'FX';
-      console.log('[twilio] intent override: FX by hard pattern');
-    }
 
     let replyObj;
 
@@ -143,7 +132,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         // OpenAI fallback for any other intent or uncertain cases
         const gpt = await openai.chat.completions.create({
           model: 'o3',
-          temperature: 0.7,
           max_completion_tokens: 2048,
           messages: [
             {
@@ -192,10 +180,8 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
       }
     }
 
-    // Postprocess: make every answer sound like Zazil (optional, for future)
-    if (replyObj && replyObj.content) {
-      replyObj.content = postprocess(replyObj.content);
-    }
+    // ALWAYS postprocess before sending!
+    replyObj = postprocess(replyObj, incoming, intent);
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 

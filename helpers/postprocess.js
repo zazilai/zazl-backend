@@ -1,55 +1,35 @@
 // helpers/postprocess.js
 
-const AMAZON_AFFILIATE_TAG = 'zazilai-20';
-
-// List of product "trigger" words (in Portuguese and English)
-const PRODUCT_TRIGGERS = [
-  'comprar', 'produto', 'loja', 'amazon', 'recomenda', 'onde encontro', 'onde posso', 'dica de', 'buy', 'shop', 'recommend', 'suggest'
-];
-
 /**
- * Makes every answer “feel like Zazil”: warm, short, and affiliate-friendly.
- * - For product/buying intent in generic answers, adds a “Dica do Zazil” with your Amazon affiliate search.
- * - Adds signature phrases, trims “robotic” endings, and formats as a friend.
- * @param {string} answer - The main AI answer.
- * @param {string} question - The incoming user question (raw).
- * @param {string} waNumber - For personalized links if needed.
+ * "Zazil-izes" only generic/news answers for personality and trust,
+ * but NEVER changes FX, events, amazon, or cancel replies.
+ * Defensive: Never throws if missing args.
+ *
+ * @param {object} replyObj - The reply object (with .content)
+ * @param {string} question - The user question (optional, safe default)
+ * @param {string} intent - The classified intent (e.g., FX, AMAZON, GENERIC, CANCEL, etc)
+ * @returns {object} The adjusted replyObj, safe to send
  */
-async function postprocess(answer, question, waNumber) {
-  let out = (answer || '').trim();
-
-  // Always keep it under 5-7 lines unless it’s an info dump
-  if (out.split('\n').length > 7) {
-    out = out.split('\n').slice(0, 6).join('\n') + '\n\n(Para mais detalhes, pergunte de novo!)';
+module.exports = function postprocess(replyObj, question = '', intent = '') {
+  // Defensive: Avoid nulls/undefined everywhere
+  if (!replyObj || typeof replyObj !== 'object' || typeof replyObj.content !== 'string') {
+    return replyObj;
   }
 
-  // Always “sign” serious, bureaucratic, or immigration answers
-  if (
-    /passaporte|imigração|green card|visto|consulado|ssn|itn|ein|licença|taxa|formulár/i.test(question)
-  ) {
-    out += `\n\n_Dica do Zazil: Sempre confirme no site oficial ou fale com um especialista. Essas informações são gerais e não substituem aconselhamento profissional._`;
+  // Normalize for downstream checks
+  const normalized = (question || '').toLowerCase();
+
+  // Only "Zazil-ize" generic/news/factual AI answers (NEVER touch special flows)
+  if (['GENERIC', 'NEWS'].includes(intent)) {
+    // Remove "Sources" section (Perplexity etc)
+    replyObj.content = replyObj.content.replace(/\n*Sources?:.*$/ims, '').trim();
+
+    // Add a classic Zazil tip, unless it's already there
+    if (!replyObj.content.match(/Dica do Zazil:/i)) {
+      replyObj.content += '\n\n💡 Dica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
+    }
   }
 
-  // Add “Dica do Zazil” with Amazon affiliate search if buying/product intent
-  const normalized = question.toLowerCase();
-  if (
-    PRODUCT_TRIGGERS.some(trigger => normalized.includes(trigger)) &&
-    !/mercado livre|magalu|walmart|best buy|target|aliexpress|shopify/i.test(normalized)
-  ) {
-    const searchTerm = encodeURIComponent(question.replace(/(onde|como|posso|comprar|uma|um|o|a|na|no|de|do|em|para|buy|shop|recommend|suggest)/gi, '').trim() || 'produto');
-    const amazonUrl = `https://www.amazon.com/s?k=${searchTerm}&tag=${AMAZON_AFFILIATE_TAG}`;
-    out += `\n\n🛒 *Dica do Zazil*: Veja opções confiáveis na Amazon:\n${amazonUrl}`;
-  }
-
-  // Add “Zazil” signature phrase at the end, but not twice
-  if (!/Zazil/.test(out)) {
-    out += `\n\n— Zazil, seu amigo nos EUA 🇺🇸🇧🇷`;
-  }
-
-  // Clean up double newlines and trailing whitespace
-  out = out.replace(/\n{3,}/g, '\n\n').trim();
-
-  return out;
-}
-
-module.exports = postprocess;
+  // Everything else (fx, amazon, events, cancel, etc) — NO CHANGE
+  return replyObj;
+};
