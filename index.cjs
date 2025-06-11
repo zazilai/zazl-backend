@@ -9,14 +9,14 @@ const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const groovooService = require('./helpers/groovoo');
 const dolarService = require('./helpers/dolar');
-const newsService = require('./helpers/news'); // If you keep for fallback, otherwise remove
+const newsService = require('./helpers/news');
 const profileSvc = require('./helpers/profile');
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 const amazonService = require('./helpers/amazon');
-const perplexityService = require('./helpers/perplexity');
+const perplexityService = require('./helpers/perplexity'); // For real-time search
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY_JSON);
 admin.initializeApp({
@@ -28,11 +28,14 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 
+// Stripe webhook: must use raw body before json parsers
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 
+// Apply body parsers for all remaining routes
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
+// Checkout and management routes
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -48,12 +51,15 @@ app.get('/api/dolar', async (req, res) => {
   }
 });
 
+// ===== MAIN WHATSAPP HANDLER (GREAT PRODUCT) =====
+
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
+    // Onboarding for first-time users
     const { wasNew } = await profileSvc.load(db, waNumber);
     if (wasNew) {
       const welcomeMsg = replyHelper.welcome(waNumber);
@@ -61,6 +67,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
+    // Enforce message quota (upgrade if exceeded)
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const upgradeMsg = replyHelper.upgrade(waNumber);
@@ -68,7 +75,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // ----- CANCEL HANDLING -----
+    // ---- 1. EARLY CANCEL HANDLER ----
+    // Always intercept cancel/cancelar phrases BEFORE intent classification!
     const incomingLower = incoming.toLowerCase();
     if (
       incomingLower.includes('cancelar zazil') ||
@@ -85,11 +93,13 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
+    // ---- 2. INTENT CLASSIFICATION ----
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
 
+    // ---- 3. INTENT HANDLING ----
     switch (intent) {
       case 'EVENT': {
         const events = await groovooService.getEvents(incoming);
@@ -102,9 +112,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'NEWS': {
-        // Use Perplexity for NEWS as well
+        // Use Perplexity for up-to-date, fact-based answers
         const { answer } = await perplexityService.search(incoming);
-        replyObj = replyHelper.news(answer && answer.trim() ? answer : 'Não consegui encontrar uma notícia relevante para isso.');
+        replyObj = replyHelper.news(answer);
         break;
       }
       case 'AMAZON': {
@@ -113,16 +123,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'GENERIC': {
-        // Use Perplexity for fact-based/generic
+        // Use Perplexity for most generic/factual queries
         const { answer } = await perplexityService.search(incoming);
-        replyObj = replyHelper.generic(answer && answer.trim() ? answer : 
-          'Não consegui encontrar uma resposta exata para isso. Quer tentar perguntar de outra forma?');
+        replyObj = replyHelper.generic(answer);
         break;
       }
       default: {
-        // OpenAI fallback (use 'o3' for max cost-efficiency)
+        // Fallback: classic OpenAI for personality, non-factual, or “edge” cases
         const gpt = await openai.chat.completions.create({
-          model: 'o3',
+          model: 'o3', // Using latest o3 (cheaper & smart)
           temperature: 0.7,
           max_tokens: 2048,
           messages: [
@@ -151,6 +160,7 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
 
         let content = gpt.choices?.[0]?.message?.content || '';
 
+        // Long answer? Save in Firestore, reply with short + link.
         const docRef = await db.collection('responses').add({
           user: waNumber,
           prompt: incoming,
@@ -159,7 +169,6 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
         });
 
         const docId = docRef.id;
-
         const MAX_LEN = 1600;
         if (content.length > MAX_LEN) {
           const cut = content.lastIndexOf('\n', MAX_LEN);
@@ -172,6 +181,7 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
       }
     }
 
+    // Track usage in Firestore
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
     let safeContent = 'Desculpe, não consegui entender.';
@@ -179,7 +189,6 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
       safeContent = replyObj.content;
     } else {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
-      safeContent = 'Não consegui entender ou encontrar resposta. Quer perguntar de outro jeito?';
     }
 
     res.type('text/xml');
@@ -187,7 +196,7 @@ Lembre-se: você é do bem. Um usuário deve sentir confiança e acolhimento ao 
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
     res.type('text/xml');
-    res.send(`<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde ou faça sua pergunta de outra forma.</Message></Response>`);
+    res.send(`<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde.</Message></Response>`);
   }
 });
 
