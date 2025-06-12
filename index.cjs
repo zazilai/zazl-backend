@@ -214,7 +214,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    let safeContent = 'Desculpe, não consegui entender.';
+    // === ULTIMATE FALLBACK LOGIC HERE ===
+    let safeContent = replyHelper.fallback().content; // << Standardized fallback
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = replyObj.content;
     } else {
@@ -226,7 +227,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
     res.type('text/xml');
-    res.send(`<Response><Message>Desculpe, ocorreu um erro interno. Tente novamente mais tarde.</Message></Response>`);
+    res.send(`<Response><Message>${replyHelper.fallback().content}</Message></Response>`);
   }
 });
 
