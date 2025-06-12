@@ -20,7 +20,7 @@ Você é um assistente que resume dados do usuário.
   const response = await openai.chat.completions.create({
     model: 'o3',
     max_completion_tokens: 100,
-    temperature: 0.1,
+    temperature: 1, // safest for o3 or 4o
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: `Resumo atual:\n${oldSummary || ''}\n\nNova mensagem:\n${userMessage}\n\nResumo atualizado:` }
