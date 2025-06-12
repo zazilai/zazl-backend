@@ -11,23 +11,46 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  */
 async function updateUserSummary(oldSummary, userMessage) {
   const systemPrompt = `
-Você é um assistente que resume dados do usuário.
-- Extraia dados úteis das mensagens (nome, cidade, profissão, eventos, interesses, datas importantes, preferências, etc.).
-- Atualize o resumo, sem inventar, em até 3 linhas.
-- Se nada for relevante, mantenha igual ou deixe vazio.
+Você é um assistente de extração de dados de usuário para contexto de IA.
+Extraia e liste todos os dados relevantes, SEMPRE, em até 3 linhas, mesmo se forem poucos (nome, cidade, profissão, eventos, interesses, datas importantes, preferências, etc).
+Só mantenha vazio se NÃO houver absolutamente nenhuma informação relevante.
+Não invente nada e nunca resuma demais: apenas extraia informações factuais.
+Se não houver informações úteis, devolva exatamente a string recebida em "Resumo atual".
+Exemplo:
+Resumo atual:
+Pedro mora em Austin.
+
+Nova mensagem:
+Eu gosto de futebol e sou engenheiro.
+
+Resumo atualizado:
+Pedro mora em Austin. Gosta de futebol. Profissão: engenheiro.
 `;
 
-  const response = await openai.chat.completions.create({
-    model: 'o3',
-    max_completion_tokens: 100,
-    temperature: 1, // safest for o3 or 4o
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Resumo atual:\n${oldSummary || ''}\n\nNova mensagem:\n${userMessage}\n\nResumo atualizado:` }
-    ]
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'o3',
+      max_completion_tokens: 100,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Resumo atual:\n${oldSummary || ''}\n\nNova mensagem:\n${userMessage}\n\nResumo atualizado:` }
+      ]
+    });
 
-  return response.choices?.[0]?.message?.content?.trim() || (oldSummary || '');
+    const content = response.choices?.[0]?.message?.content?.trim();
+    console.log('[MEMORY] Old:', oldSummary);
+    console.log('[MEMORY] Incoming:', userMessage);
+    console.log('[MEMORY] New:', content);
+
+    if (content && content !== oldSummary && content.length > 1) {
+      return content;
+    } else {
+      return oldSummary || '';
+    }
+  } catch (err) {
+    console.error('[MEMORY] Error in updateUserSummary:', err);
+    return oldSummary || '';
+  }
 }
 
 module.exports = { updateUserSummary };
