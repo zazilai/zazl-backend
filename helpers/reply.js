@@ -54,17 +54,19 @@ function welcome(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
-    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro nos EUA 🇺🇸🇧🇷
+    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro para vida no exterior 🇺🇸🇧🇷
 
-Você está no *teste grátis do plano Lite* — pode me mandar até 15 mensagens por dia durante 7 dias!
+Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dolares por mes!
 
-💡 Quer continuar? Assine:
+💡 Se quiser, para te ajudar melhor, já me conte de onde você está falando (ex: “Sou de Recife, moro em Austin com minha família”)! Assim eu personalizo ainda mais as respostas pra você.
+
+Dicas rápidas:
+- Ainda não entendo áudios;
+- Prefiro perguntas completas em uma única mensagem.
+
+Da pra assinar o plano agora também, é muito fácil:
 🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
 🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
-
-❗ *Importante:*
-- Não entendo áudios ainda;
-- Prefiro que mande sua pergunta completa em uma única mensagem.
 
 Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
   };
