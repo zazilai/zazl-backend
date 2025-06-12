@@ -113,11 +113,19 @@ function amazon(items) {
   };
 }
 
-// --- ULTIMATE FALLBACK ---
+// --- Standard Fallback ---
 function fallback() {
   return {
     type: 'text',
     content: "Foi mal, ocorreu um erro inesperado. Tente novamente em alguns minutos, ou mude um pouco sua mensagem para eu entender melhor o contexto. Se precisar de suporte, responda aqui ou mande email para zazil@worldofbrazil.ai"
+  };
+}
+
+// --- Outage Fallback (for Firebase etc) ---
+function fallbackOutage() {
+  return {
+    type: 'text',
+    content: "Eita, ocorreu um probleminha aqui com o sistema. Me dá uns minutinhos e pode me perguntar de novo por favor? 😉\n\nSe precisar de suporte imediato: zazil@worldofbrazil.ai"
   };
 }
 
@@ -130,5 +138,6 @@ module.exports = {
   upgrade,
   cancel,
   amazon,
-  fallback // <--- add fallback to exports!
+  fallback,
+  fallbackOutage,
 };

@@ -70,7 +70,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // -------- Robust CANCEL detection (before intent) ---------
+    // Robust CANCEL detection (before intent)
     const incomingLower = incoming.toLowerCase();
     if (
       /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(incomingLower) ||
@@ -95,7 +95,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // ---- Memory context for prompt ----
+    // Memory context for prompt
     let memorySummary = '';
     try {
       const profileDoc = await db.collection('profiles').doc(waNumber).get();
@@ -104,7 +104,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       memorySummary = '';
     }
 
-    // -------- Intent detection ---------
+    // Intent detection
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
@@ -191,12 +191,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // --------- Postprocess for generic/news ----------
+    // Postprocess for generic/news
     replyObj = postprocess(replyObj, incoming, intent);
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    // ——— MEMORY UPDATE (async, with debug logs) ———
+    // MEMORY UPDATE (async, with debug logs)
     if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
       try {
         const profileDoc = db.collection('profiles').doc(waNumber);
@@ -222,8 +222,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // ----------- Standardized fallback -----------
-    let safeContent = replyHelper.fallback().content; // << Standardized fallback
+    // Standardized fallback
+    let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = replyObj.content;
     } else {
@@ -234,6 +234,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
+    // OUTAGE FALLBACK if Firestore/Firebase/network error
+    if (
+      (err.message && err.message.match(/firestore|firebase|unavailable|timeout|network/i)) ||
+      (err.code && err.code.toString().includes('unavailable'))
+    ) {
+      res.type('text/xml');
+      return res.send(`<Response><Message>${replyHelper.fallbackOutage().content}</Message></Response>`);
+    }
+    // Otherwise, normal fallback
     res.type('text/xml');
     res.send(`<Response><Message>${replyHelper.fallback().content}</Message></Response>`);
   }
