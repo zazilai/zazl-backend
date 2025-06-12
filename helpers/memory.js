@@ -11,42 +11,61 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  */
 async function updateUserSummary(oldSummary, userMessage) {
   const systemPrompt = `
-Você é um assistente de extração de dados de usuário para contexto de IA.
-Extraia e liste todos os dados relevantes, SEMPRE, em até 3 linhas, mesmo se forem poucos (nome, cidade, profissão, eventos, interesses, datas importantes, preferências, etc).
-Só mantenha vazio se NÃO houver absolutamente nenhuma informação relevante.
-Não invente nada e nunca resuma demais: apenas extraia informações factuais.
-Se não houver informações úteis, devolva exatamente a string recebida em "Resumo atual".
-Exemplo:
+Você é um assistente de IA que EXTRAI dados úteis do usuário a cada nova mensagem, para um contexto de memória curta.
+Sempre que encontrar um dado objetivo novo (nome, cidade, profissão, data, hobby, interesse, aniversário, etc), adicione à lista. Se já estiver no resumo anterior, mantenha. JAMAIS deixe em branco se a mensagem contiver qualquer dado.
+- Retorne tudo como uma frase ou lista curta, no máximo 3 linhas.
+- Se NÃO houver absolutamente nenhum dado útil (ex: só "ok", "obrigado", etc), devolva o resumo anterior.
+Exemplos:
+
 Resumo atual:
 Pedro mora em Austin.
 
 Nova mensagem:
-Eu gosto de futebol e sou engenheiro.
+Sou engenheiro. Gosto de futebol.
 
 Resumo atualizado:
-Pedro mora em Austin. Gosta de futebol. Profissão: engenheiro.
+Pedro mora em Austin. Profissão: engenheiro. Gosta de futebol.
+
+Resumo atual:
+
+
+Nova mensagem:
+Meu nome é Maria, moro em Miami, adoro culinária.
+
+Resumo atualizado:
+Nome: Maria. Mora em Miami. Gosta de culinária.
+
+Resumo atual:
+João, professor em Boston.
+
+Nova mensagem:
+Faço aniversário em 10 de maio.
+
+Resumo atualizado:
+João, professor em Boston. Aniversário: 10 de maio.
+
+Agora, use esse padrão para atualizar:
 `;
 
   try {
     const response = await openai.chat.completions.create({
       model: 'o3',
-      max_completion_tokens: 100,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Resumo atual:\n${oldSummary || ''}\n\nNova mensagem:\n${userMessage}\n\nResumo atualizado:` }
       ]
     });
 
-    const content = response.choices?.[0]?.message?.content?.trim();
+    const content = response.choices?.[0]?.message?.content?.trim() || '';
     console.log('[MEMORY] Old:', oldSummary);
     console.log('[MEMORY] Incoming:', userMessage);
     console.log('[MEMORY] New:', content);
 
-    if (content && content !== oldSummary && content.length > 1) {
+    // Store only if content is not empty and not exactly equal to oldSummary
+    if (content && content !== oldSummary) {
       return content;
-    } else {
-      return oldSummary || '';
     }
+    return oldSummary || '';
   } catch (err) {
     console.error('[MEMORY] Error in updateUserSummary:', err);
     return oldSummary || '';
