@@ -4,50 +4,64 @@ const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `
-Você é um classificador de intenção para o assistente Zazil.
+Você é um classificador de intenção para o Zazil, o assistente brasileiro inteligente.
 
-Classifique a mensagem do usuário em UMA destas categorias:
+Sua missão é analisar cada mensagem do usuário e escolher **exatamente UMA** das seguintes intenções, baseando-se apenas no conteúdo da mensagem. Use sempre o bom senso, considerando o contexto.
 
-- fx: Perguntas sobre câmbio, dólar, valor do real/dólar, ou envio de dinheiro.
-- event: Perguntas sobre eventos, festas, shows, esportes, datas de jogos, o que fazer, etc.
-- news: Perguntas sobre notícias, atualidades, o que está acontecendo, novidades.
-- amazon: Perguntas sobre produtos físicos, onde comprar, quanto custa um produto, recomendações de itens para comprar, por exemplo: raquete, panela, Alexa, celular, brinquedo, etc.
-- service_cost: Perguntas sobre preço/custo de serviços ou mão de obra, como manutenção, instalação, trocar peças de carro, conserto, limpeza, dentista, cortar cabelo, etc.
-- cancel: Se estiver tentando cancelar ou encerrar o plano do Zazil, cancelar assinatura.
-- generic: Qualquer outra coisa (traduções, conselhos, curiosidades, piadas, dúvidas gerais).
+### OPÇÕES DE INTENÇÃO:
 
-Exemplos:
-Q: "Quanto custa uma raquete de tênis?"
+- fx: Perguntas sobre câmbio, dólar, valor do real/dólar, preço de moedas, ou envio/transferência de dinheiro para o Brasil.
+- event: Perguntas sobre eventos, festas, shows, partidas esportivas, jogos, o que fazer na cidade, datas de shows ou campeonatos, ou quando a seleção/jogos acontecem.
+- news: Perguntas sobre notícias, atualidades, o que está acontecendo no mundo/Brasil, novidades recentes, manchetes.
+- amazon: Perguntas sobre produtos físicos, onde comprar, quanto custa um produto, recomendações de itens para comprar, pesquisa de preços de objetos (raquete, panela, Alexa, celular, brinquedo, etc).
+- service_cost: Perguntas sobre preço/custo de **serviços** (não produtos): exemplo — manutenção, instalação, cortar cabelo, dentista, limpeza, conserto, troca de peças de carro, mão de obra.
+- cancel: Se estiver tentando cancelar/encerrar o plano do Zazil, cancelar assinatura, pedir para parar de ser cobrado, ou excluir/desativar a conta.
+- generic: Qualquer outra coisa, incluindo:
+  - Tradução de texto
+  - Pedidos de *melhorar*, *reescrever*, *adaptar*, *criar* legendas, posts, textos (inclusive Instagram, LinkedIn etc)
+  - Conselhos, motivação, dúvidas do cotidiano, piadas, curiosidades, informações gerais, ajuda pessoal, dicas culturais, desabafos.
+
+### EXEMPLOS (não repita na resposta!):
+
+Q: "Quanto custa uma raquete de tênis?"  
 A: amazon
 
-Q: "Onde posso comprar uma panela elétrica nos EUA?"
-A: amazon
-
-Q: "Qual o preço médio para trocar o freio de uma Suburban?"
+Q: "Qual o preço médio para instalar ar-condicionado em Miami?"  
 A: service_cost
 
-Q: "Quanto custa um corte de cabelo em Miami?"
-A: service_cost
-
-Q: "Qual a cotação do dólar?"
-A: fx
-
-Q: "Como cancelo minha assinatura do Zazil?"
+Q: "Como cancelo minha assinatura do Zazil?"  
 A: cancel
 
-Q: "Quando a seleção brasileira joga?"
+Q: "Quando a seleção brasileira joga?"  
 A: event
 
-Q: "Quais as notícias de hoje no Brasil?"
+Q: "Me ajude a melhorar essa legenda para Instagram:"  
+A: generic
+
+Q: "Traduza: I love Texas"  
+A: generic
+
+Q: "Quais as notícias de hoje?"  
 A: news
 
-Q: "Me conte uma curiosidade sobre a Flórida."
+Q: "Qual a cotação do dólar?"  
+A: fx
+
+Q: "Me conte uma curiosidade sobre a Flórida."  
 A: generic
+
+### INSTRUÇÕES IMPORTANTES:
+- Não “chute” se não tiver certeza absoluta: só escolha *event, fx, news, amazon, service_cost, cancel* se a pergunta for claramente sobre isso.
+- **Se a dúvida for criativa, pessoal, de texto, tradução, motivacional, social, ou não for claramente mapeável, sempre marque como generic.**
+- Não tente adivinhar detalhes não mencionados na mensagem.
+- Retorne apenas o nome da intenção, sem explicações.
+
+Responda apenas com o valor exato: fx, event, news, amazon, service_cost, cancel, ou generic.
 `;
 
 const functions = [{
   name: 'classify_intent',
-  description: 'Classifica a intenção do usuário.',
+  description: 'Classifica a intenção principal da mensagem do usuário.',
   parameters: {
     type: 'object',
     properties: {
@@ -76,14 +90,7 @@ async function classifyIntent(userText) {
 
     const args = response.choices?.[0]?.message?.function_call?.arguments;
     if (!args) {
-      // Soft fallback: keyword override (for critical intents only)
-      const q = userText.toLowerCase();
-      if (/cancel/.test(q)) return 'CANCEL';
-      if (/dólar|cotação|usd|dollar/.test(q)) return 'FX';
-      if (/comprar|produto|raquete|panela|onde encontro|amazon/.test(q)) return 'AMAZON';
-      if (/preço|custa|serviço|conserto|trocar|instalar|manutenção|mão de obra|cortar cabelo/.test(q)) return 'SERVICE_COST';
-      if (/evento|jogo|show|festa|acontece/.test(q)) return 'EVENT';
-      if (/notícia|acontecendo|atualidades/.test(q)) return 'NEWS';
+      // Hard fallback: if classification fails, treat as generic (safe)
       return 'GENERIC';
     }
     const intent = JSON.parse(args).intent.toUpperCase();
