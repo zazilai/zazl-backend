@@ -90,7 +90,8 @@ const functions = [{
 async function classifyIntent(userText) {
   try {
     const response = await openai.chat.completions.create({
-      model: 'o3',
+      model: 'gpt-4.1',
+      temperature: 0.3,
       max_completion_tokens: 10,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },

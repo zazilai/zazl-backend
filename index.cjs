@@ -104,7 +104,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       memorySummary = '';
     }
 
-    // Intent detection
+    // Intent detection (now using GPT-4.1 at temp=0.3)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
@@ -157,8 +157,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           userPrompt = `[DADOS DO USUÁRIO ATÉ AGORA]:\n${memorySummary}\n\n[PERGUNTA]:\n${incoming}`;
         }
         const gpt = await openai.chat.completions.create({
-          model: 'o3',
-          temperature: 1,
+          model: 'gpt-4.1',
+          temperature: 0.3,
           max_completion_tokens: 2048,
           messages: [
             {
