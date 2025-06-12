@@ -111,6 +111,14 @@ function amazon(items) {
   };
 }
 
+// --- ULTIMATE FALLBACK ---
+function fallback() {
+  return {
+    type: 'text',
+    content: "Foi mal, ocorreu um erro inesperado. Tente novamente em alguns minutos, ou mude um pouco sua mensagem para eu entender melhor o contexto. Se precisar de suporte, responda aqui ou mande email para zazil@worldofbrazil.ai"
+  };
+}
+
 module.exports = {
   generic,
   dolar,
@@ -119,5 +127,6 @@ module.exports = {
   welcome,
   upgrade,
   cancel,
-  amazon
+  amazon,
+  fallback // <--- add fallback to exports!
 };
