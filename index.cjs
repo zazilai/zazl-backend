@@ -70,7 +70,23 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Greeting detection (ALWAYS reply to basic greetings)
+    // -------- Robust CANCEL detection (before intent) ---------
+    const incomingLower = incoming.toLowerCase();
+    if (
+      /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(incomingLower) ||
+      incomingLower.includes('cancelar zazil') ||
+      incomingLower.includes('cancelar plano') ||
+      incomingLower.includes('cancelar assinatura') ||
+      incomingLower.includes('cancel my plan') ||
+      incomingLower.includes('cancel subscription') ||
+      incomingLower.includes('cancel zazil')
+    ) {
+      const cancelMsg = replyHelper.cancel(waNumber);
+      res.type('text/xml');
+      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
+    }
+
+    // Greeting detection
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
@@ -79,24 +95,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // Cancelation phrase (before intent classification)
-    const incomingLower = incoming.toLowerCase();
-    if (
-      incomingLower.includes('cancelar zazil') ||
-      incomingLower.includes('cancelo zazil') ||
-      incomingLower.includes('cancelar plano') ||
-      incomingLower.includes('cancelar assinatura') ||
-      incomingLower.includes('cancel my plan') ||
-      incomingLower.includes('cancel subscription') ||
-      incomingLower.includes('cancel zazil') ||
-      incomingLower.match(/\bcancel\b/)
-    ) {
-      const cancelMsg = replyHelper.cancel(waNumber);
-      res.type('text/xml');
-      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
-    }
-
-    // Load previous memory for prompt context (optional, scalable)
+    // ---- Memory context for prompt ----
     let memorySummary = '';
     try {
       const profileDoc = await db.collection('profiles').doc(waNumber).get();
@@ -105,15 +104,19 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       memorySummary = '';
     }
 
-    // Intent classification (GPT-4o, o3, or your choice)
+    // -------- Intent detection ---------
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
 
     switch (intent) {
+      case 'CANCEL': {
+        const cancelMsg = replyHelper.cancel(waNumber);
+        replyObj = cancelMsg;
+        break;
+      }
       case 'EVENT': {
-        // Aggregate events from Groovoo, Ticketmaster, fallback to Perplexity if empty
         const { events, fallbackText } = await eventsAggregator.aggregateEvents(incoming);
         if (events && events.length > 0) {
           replyObj = replyHelper.events(events);
@@ -144,14 +147,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'GENERIC': {
-        // Use Perplexity for fact-based generic questions
         const { answer } = await perplexityService.search(incoming);
         replyObj = replyHelper.generic(answer);
         break;
       }
       default: {
-        // OpenAI fallback for any other intent or uncertain cases
-        // —> inject memory/context if available
         let userPrompt = incoming;
         if (memorySummary && memorySummary.trim().length > 0) {
           userPrompt = `[DADOS DO USUÁRIO ATÉ AGORA]:\n${memorySummary}\n\n[PERGUNTA]:\n${incoming}`;
@@ -171,7 +171,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
         let content = gpt.choices?.[0]?.message?.content || '';
 
-        // Save response to Firestore for truncation/view links
         const docRef = await db.collection('responses').add({
           user: waNumber,
           prompt: incoming,
@@ -192,12 +191,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // Run postprocess for generic/news only
+    // --------- Postprocess for generic/news ----------
     replyObj = postprocess(replyObj, incoming, intent);
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    // ——— MEMORY UPDATE (async, non-blocking) ———
+    // ——— MEMORY UPDATE (async, with debug logs) ———
     if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
       try {
         const profileDoc = db.collection('profiles').doc(waNumber);
@@ -205,16 +204,25 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         memorySvc
           .updateUserSummary(old, incoming)
           .then(summary => {
+            console.log('[MEMORY] Old:', old);
+            console.log('[MEMORY] Incoming:', incoming);
+            console.log('[MEMORY] New:', summary);
             if (summary && summary !== old) {
+              console.log('[MEMORY] Updating Firestore for', waNumber, '→', summary);
               profileDoc.set({ memory: summary }, { merge: true });
+            } else {
+              console.log('[MEMORY] No new memory to store for', waNumber);
             }
+          })
+          .catch(err => {
+            console.error('[MEMORY] Error in updateUserSummary:', err);
           });
       } catch (e) {
-        // Fail silently, memory is non-blocking
+        console.error('[MEMORY] Outer error:', e);
       }
     }
 
-    // === ULTIMATE FALLBACK LOGIC HERE ===
+    // ----------- Standardized fallback -----------
     let safeContent = replyHelper.fallback().content; // << Standardized fallback
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = replyObj.content;
