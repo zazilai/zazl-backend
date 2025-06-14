@@ -1,3 +1,5 @@
+// index.cjs
+
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -74,6 +76,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const pendingOptIn = await getPendingAlertOptIn(db, waNumber);
   if (pendingOptIn && pendingOptIn.city && AFFIRMATIVE_REGEX.test(incoming)) {
     await addAlert(db, waNumber, pendingOptIn.city);
+    await clearPendingAlertOptIn(db, waNumber);
     res.type('text/xml');
     return res.send(`<Response><Message>Fechado! Vou te avisar quando rolar novidade de evento brasileiro em ${pendingOptIn.city}.</Message></Response>`);
   }
@@ -155,7 +158,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       memorySummary = '';
     }
 
-    // Intent detection (now using GPT-4.1 at temp=0.3)
+    // Intent detection (GPT-4.1, temp=0.3)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
@@ -169,18 +172,17 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'EVENT': {
+        // ⬇️ EVENTS with fallback and city handling
         const { events, fallbackText, city } = await eventsAggregator.aggregateEvents(incoming);
         eventsCity = city || '';
         if (events && events.length > 0) {
           replyObj = replyHelper.events(events, city, fallbackText);
+          if (eventsCity) await setPendingAlertOptIn(db, waNumber, eventsCity);
         } else if (fallbackText) {
-          replyObj = replyHelper.events([], city, fallbackText);
+          replyObj = replyHelper.generic(fallbackText);
+          if (city) await setPendingAlertOptIn(db, waNumber, city);
         } else {
-          replyObj = replyHelper.events([], city);
-        }
-        // Set pending alert opt-in for this city (for next 5 min)
-        if (eventsCity) {
-          await setPendingAlertOptIn(db, waNumber, eventsCity);
+          replyObj = replyHelper.generic("Não encontrei nenhum evento relevante agora, mas continuo pesquisando novidades pra você! 😉");
         }
         break;
       }
@@ -253,7 +255,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    // MEMORY UPDATE (async, with debug logs)
+    // MEMORY UPDATE (async)
     if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
       try {
         const profileDoc = db.collection('profiles').doc(waNumber);
@@ -261,14 +263,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         memorySvc
           .updateUserSummary(old, incoming)
           .then(summary => {
-            console.log('[MEMORY] Old:', old);
-            console.log('[MEMORY] Incoming:', incoming);
-            console.log('[MEMORY] New:', summary);
             if (summary && summary !== old) {
-              console.log('[MEMORY] Updating Firestore for', waNumber, '→', summary);
               profileDoc.set({ memory: summary }, { merge: true });
-            } else {
-              console.log('[MEMORY] No new memory to store for', waNumber);
             }
           })
           .catch(err => {
