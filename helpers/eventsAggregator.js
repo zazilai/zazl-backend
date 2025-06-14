@@ -1,7 +1,6 @@
 // helpers/eventsAggregator.js
 
 const groovoo = require('./groovoo');
-const ticketmaster = require('./ticketmaster');
 const perplexity = require('./perplexity');
 
 async function aggregateEvents(userMessage) {
@@ -11,25 +10,21 @@ async function aggregateEvents(userMessage) {
   const match = lower.match(/em ([a-zãéíóúç\s]+)/i);
   if (match) city = match[1].trim();
 
-  // 2. Groovoo (e Ticketmaster, se quiser ativar)
+  // 2. Groovoo
   const groovooEvents = await groovoo.getEvents(userMessage);
-  // Se quiser usar ticketmaster, adicione aqui (opcional)
-  // let tmEvents = [];
-  // if (city) tmEvents = await ticketmaster.getEvents(city);
-
-  // Junta eventos
-  const allEvents = [...groovooEvents]; // [...groovooEvents, ...tmEvents] se usar TM
+  console.log('[eventsAggregator] groovooEvents:', groovooEvents.length);
 
   // 3. Fallback: Se nenhum evento, consulta Perplexity
   let fallbackText = '';
-  if (!allEvents.length) {
+  if (!groovooEvents.length) {
     const { answer } = await perplexity.search(
       `Quais eventos brasileiros, festas ou shows tem em ${city || 'minha cidade'} nos próximos dias?`
     );
+    console.log('[eventsAggregator] Perplexity answer:', answer);
     fallbackText = answer;
   }
 
-  return { events: allEvents, fallbackText };
+  return { events: groovooEvents, fallbackText };
 }
 
 module.exports = { aggregateEvents };

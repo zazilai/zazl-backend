@@ -1,9 +1,7 @@
 // helpers/groovoo.js
 const axios = require('axios');
-
 const API_URL = 'https://api.groovoo.io/ticketing_events';
 
-// Função para normalizar strings (remove acentos, lowercase)
 function normalize(str) {
   return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : '';
 }
@@ -18,28 +16,29 @@ async function getEvents(userMessage) {
     const city = extractCity(userMessage);
     const res = await axios.get(API_URL, { headers: { 'Accept': 'application/json' } });
     const events = Array.isArray(res.data) ? res.data : res.data.data || [];
+    console.log('[groovoo.js] RAW events from API:', events.length);
 
-    // Filtra eventos futuros, status 1, payed true
+    // Filtra eventos futuros
     let filtered = events.filter(evt =>
       evt.status === 1 &&
       evt.payed === true &&
-      new Date(evt.start_at) > new Date()
+      evt.start_at && new Date(evt.start_at) > new Date()
     );
 
     // Se cidade informada, filtra por cidade normalizada
     if (city) {
       filtered = filtered.filter(evt =>
         evt.address &&
-        normalize(evt.address.city).includes(city)
+        normalize(evt.address.city || '') === city
       );
     }
 
-    // Ordena e limita
+    console.log('[groovoo.js] Filtered events:', filtered.length, '| City:', city);
+
     filtered = filtered.sort(
       (a, b) => new Date(a.start_at) - new Date(b.start_at)
     ).slice(0, 6);
 
-    // Retorna eventos formatados
     return filtered.map(evt => ({
       name: evt.name,
       start_time: new Date(evt.start_at).toLocaleString('pt-BR', {
