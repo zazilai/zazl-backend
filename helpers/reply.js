@@ -16,60 +16,28 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-function events(list = [], city = '', fallbackText = '') {
-  const dicas = [
-    'Chegue cedo pra garantir o melhor lugar!',
-    'Convide amigos — quanto mais gente, melhor!',
-    'Fique de olho nos grupos de brasileiros da sua cidade!',
-    'Leve sua bandeira do Brasil pra animar ainda mais!',
-    'Eventos brasileiros costumam lotar rápido – garanta seu ingresso!'
-  ];
-  const dica = dicas[Math.floor(Math.random() * dicas.length)];
-
-  if (list.length > 0) {
-    const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n\n`;
-    const lines = list.map(evt => {
-      const date = evt.start_time || '';
-      const name = evt.name || '';
-      const location = evt.location || '';
-      const url = evt.url || '';
-      return `🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
-    }).join('\n\n');
+// Eventos: inclui imagem do evento no início do texto, preview WhatsApp
+function events(list = []) {
+  if (!list.length) {
     return {
       type: 'text',
-      content: [
-        header + lines,
-        `\n💡 Dica do Zazil: ${dica}`,
-        `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
-        `\nConhece outro evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui que ajudo a divulgar!`
-      ].filter(Boolean).join('\n')
+      content: '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!'
     };
   }
-
-  // No events from partners, but Perplexity gave a result
-  if (fallbackText && fallbackText.trim().length > 10) {
-    return {
-      type: 'text',
-      content: [
-        `Não encontrei eventos dos meus parceiros agora, mas fiz uma pesquisa extra pra te ajudar:\n`,
-        `🌐 ${fallbackText.trim()}`,
-        `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
-        `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
-        `\n💡 Dica do Zazil: ${dica}`
-      ].filter(Boolean).join('\n')
-    };
-  }
-
-  // Nothing found at all
+  const header = '🎉 *Eventos em Destaque:*\n\n';
+  const lines = list.map((evt, i) => {
+    // Exibe imagem para cada evento (pode limitar a só o primeiro se quiser)
+    let img = evt.image ? `${evt.image}\n` : '';
+    let info =
+      `🗓️ *${evt.name}*\n` +
+      `📍 ${evt.location}\n` +
+      `🕒 ${evt.start_time}\n` +
+      `🔗 ${evt.url}`;
+    return img + info;
+  }).join('\n\n');
   return {
     type: 'text',
-    content: [
-      `📅 Não achei eventos brasileiros${city ? ` em ${city}` : ''} agora.`,
-      `Mas posso te avisar assim que surgir novidade por aqui!`,
-      `Quer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
-      `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
-      `\n💡 Dica do Zazil: ${dica}`
-    ].filter(Boolean).join('\n')
+    content: header + lines
   };
 }
 
@@ -92,7 +60,7 @@ function welcome(waNumber) {
     type: 'text',
     content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro para vida no exterior 🇺🇸🇧🇷
 
-Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dolares por mes!
+Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dólares por mês!
 
 💡 Se quiser, para te ajudar melhor, já me conte de onde você está falando (ex: “Sou de Recife, moro em Austin com minha família”)! Assim eu personalizo ainda mais as respostas pra você.
 
@@ -100,7 +68,7 @@ Dicas rápidas:
 - Ainda não entendo áudios;
 - Prefiro perguntas completas em uma única mensagem.
 
-Da pra assinar o plano agora também, é muito fácil:
+Dá pra assinar o plano agora também, é muito fácil:
 🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
 🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
@@ -149,6 +117,7 @@ function amazon(items) {
   };
 }
 
+// --- Standard Fallback ---
 function fallback() {
   return {
     type: 'text',
@@ -156,6 +125,7 @@ function fallback() {
   };
 }
 
+// --- Outage Fallback (for Firebase etc) ---
 function fallbackOutage() {
   return {
     type: 'text',
