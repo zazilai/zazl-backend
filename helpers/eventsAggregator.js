@@ -9,14 +9,12 @@ async function aggregateEvents(userMessage) {
   const match = lower.match(/em ([a-zãéíóúç\s]+)/i);
   if (match) city = match[1].trim();
 
-  // 1. Busca todos eventos futuros
+  // Busca todos eventos futuros
   const groovooEvents = await groovoo.getEvents(userMessage);
   console.log('[eventsAggregator] groovooEvents:', groovooEvents.length);
 
-  let filteredEvents = groovooEvents;
-
-  // 2. Se for pergunta de cidade e não achou nada, tenta Perplexity
-  if (city && (!filteredEvents || filteredEvents.length === 0)) {
+  // Se cidade específica e não achou nada, tenta Perplexity
+  if (city && (!groovooEvents || groovooEvents.length === 0)) {
     const { answer } = await perplexity.search(
       `Quais eventos brasileiros, festas ou shows tem em ${city} nos próximos dias?`
     );
@@ -24,8 +22,8 @@ async function aggregateEvents(userMessage) {
     return { events: [], fallbackText: answer };
   }
 
-  // 3. Se for pedido genérico, retorna eventos futuros (até 6)
-  if (!city && (!filteredEvents || filteredEvents.length === 0)) {
+  // Se pergunta genérica e não achou nada, Perplexity
+  if (!city && (!groovooEvents || groovooEvents.length === 0)) {
     const { answer } = await perplexity.search(
       'Quais os próximos eventos brasileiros nos EUA?'
     );
@@ -33,8 +31,8 @@ async function aggregateEvents(userMessage) {
     return { events: [], fallbackText: answer };
   }
 
-  // 4. Se achou eventos, retorna normal
-  return { events: filteredEvents, fallbackText: '' };
+  // Se achou eventos, retorna normal
+  return { events: groovooEvents, fallbackText: '' };
 }
 
 module.exports = { aggregateEvents };

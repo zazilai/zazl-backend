@@ -16,13 +16,10 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-// EVENTS — Now includes image link if present
+// EVENTS — Now includes opt-in and gracefully returns null for empty lists (handled by aggregator logic)
 function events(list = []) {
   if (!list.length) {
-    return {
-      type: 'text',
-      content: '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!'
-    };
+    return null; // aggregator will handle fallback
   }
   const header = '🎉 *Eventos em Destaque:*\n\n';
   const lines = list.map(evt => {
@@ -33,9 +30,12 @@ function events(list = []) {
     const image = evt.image ? `[🖼️ Ver imagem do evento](${evt.image})\n` : '';
     return `${image}🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
   }).join('\n\n');
+
+  // Opt-in prompt for alerts if there are events
+  const optinMsg = '\n\n🔔 *Quer ser avisado quando sair novos eventos parecidos?* Responda "Sim" nos próximos 5 minutos!';
   return {
     type: 'text',
-    content: header + lines
+    content: header + lines + optinMsg
   };
 }
 
