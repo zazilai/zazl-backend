@@ -3,10 +3,14 @@ const axios = require('axios');
 
 const API_URL = 'https://api.groovoo.io/ticketing_events';
 
-// Extrai cidade da mensagem do usuário (em <cidade>)
+// Função para normalizar strings (remove acentos, lowercase)
+function normalize(str) {
+  return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : '';
+}
+
 function extractCity(userMessage) {
   const match = userMessage.toLowerCase().match(/em\s+([a-zãéíóúç\s]+)/i);
-  return match ? match[1].trim().toLowerCase() : '';
+  return match ? normalize(match[1]) : '';
 }
 
 async function getEvents(userMessage) {
@@ -15,28 +19,27 @@ async function getEvents(userMessage) {
     const res = await axios.get(API_URL, { headers: { 'Accept': 'application/json' } });
     const events = Array.isArray(res.data) ? res.data : res.data.data || [];
 
-    // Filtro: eventos futuros, status OK, pagantes
+    // Filtra eventos futuros, status 1, payed true
     let filtered = events.filter(evt =>
       evt.status === 1 &&
       evt.payed === true &&
       new Date(evt.start_at) > new Date()
     );
 
-    // Se a cidade foi informada, filtra por cidade (tolerante a variações)
+    // Se cidade informada, filtra por cidade normalizada
     if (city) {
       filtered = filtered.filter(evt =>
         evt.address &&
-        evt.address.city &&
-        evt.address.city.toLowerCase().includes(city)
+        normalize(evt.address.city).includes(city)
       );
     }
 
-    // Ordena por data e limita a 6 eventos
+    // Ordena e limita
     filtered = filtered.sort(
       (a, b) => new Date(a.start_at) - new Date(b.start_at)
     ).slice(0, 6);
 
-    // Formata resposta com imagem e infos
+    // Retorna eventos formatados
     return filtered.map(evt => ({
       name: evt.name,
       start_time: new Date(evt.start_at).toLocaleString('pt-BR', {
