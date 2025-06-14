@@ -16,13 +16,13 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-// EVENTS — Improved with Perplexity fallbackText support
+// EVENTS — Improved with Perplexity fallbackText support, never blank
 function events(list = [], city = '', fallbackText = '') {
   if (!list.length && fallbackText) {
     // Always show a clear message that Zazil did extra research!
     return {
       type: 'text',
-      content: `Não encontrei eventos de parceiros, mas fiz uma pesquisa extra para você:\n\n${fallbackText}`
+      content: `🤖 Não encontrei eventos de parceiros, mas pesquisei para você:\n\n${fallbackText}`
     };
   }
   if (!list.length) {

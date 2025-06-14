@@ -3,15 +3,6 @@
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/*
-████████████████████████████████████████████████████████████████
- ZAZIL INTENT CLASSIFIER – SYSTEM PROMPT (2025-06)
-████████████████████████████████████████████████████████████████
-• Returns only: fx, event, news, amazon, service_cost, copywriting, cancel, generic.
-• Only LLM; no fallback keyword hacks.
-• Designed to minimize wrong intent for copywriting vs events vs generic.
-*/
-
 const SYSTEM_PROMPT = `
 Você é um classificador de intenção para o assistente Zazil. Sua missão é classificar cada mensagem do usuário, sempre em **UMA** das categorias abaixo (exatamente como está escrito):
 

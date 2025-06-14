@@ -28,15 +28,12 @@ const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
-
 const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
 
 // Stripe webhook route
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
-
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -167,19 +164,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     switch (intent) {
       case 'CANCEL': {
-        const cancelMsg = replyHelper.cancel(waNumber);
-        replyObj = cancelMsg;
+        replyObj = replyHelper.cancel(waNumber);
         break;
       }
       case 'EVENT': {
-        // ⬇️ EVENTS with fallback and city handling
+        // EVENTS with fallback and city handling
         const { events, fallbackText, city } = await eventsAggregator.aggregateEvents(incoming);
         eventsCity = city || '';
         if (events && events.length > 0) {
           replyObj = replyHelper.events(events, city, fallbackText);
           if (eventsCity) await setPendingAlertOptIn(db, waNumber, eventsCity);
         } else if (fallbackText) {
-          replyObj = replyHelper.generic(fallbackText);
+          replyObj = replyHelper.events([], city, fallbackText);
           if (city) await setPendingAlertOptIn(db, waNumber, city);
         } else {
           replyObj = replyHelper.generic("Não encontrei nenhum evento relevante agora, mas continuo pesquisando novidades pra você! 😉");
@@ -275,7 +271,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // Standardized fallback
+    // Standardized fallback (never blank)
     let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = replyObj.content;
