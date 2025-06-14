@@ -16,24 +16,60 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-function events(list = []) {
-  if (!list.length) {
+function events(list = [], city = '', fallbackText = '') {
+  const dicas = [
+    'Chegue cedo pra garantir o melhor lugar!',
+    'Convide amigos — quanto mais gente, melhor!',
+    'Fique de olho nos grupos de brasileiros da sua cidade!',
+    'Leve sua bandeira do Brasil pra animar ainda mais!',
+    'Eventos brasileiros costumam lotar rápido – garanta seu ingresso!'
+  ];
+  const dica = dicas[Math.floor(Math.random() * dicas.length)];
+
+  if (list.length > 0) {
+    const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n\n`;
+    const lines = list.map(evt => {
+      const date = evt.start_time || '';
+      const name = evt.name || '';
+      const location = evt.location || '';
+      const url = evt.url || '';
+      return `🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
+    }).join('\n\n');
     return {
       type: 'text',
-      content: '📅 Nenhum evento encontrado no momento. Tente novamente mais tarde!'
+      content: [
+        header + lines,
+        `\n💡 Dica do Zazil: ${dica}`,
+        `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
+        `\nConhece outro evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui que ajudo a divulgar!`
+      ].filter(Boolean).join('\n')
     };
   }
-  const header = '🎉 *Eventos em Destaque:*\n\n';
-  const lines = list.map(evt => {
-    const date = evt.start_time || '';
-    const name = evt.name || '';
-    const location = evt.location || '';
-    const url = evt.url || '';
-    return `🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
-  }).join('\n\n');
+
+  // No events from partners, but Perplexity gave a result
+  if (fallbackText && fallbackText.trim().length > 10) {
+    return {
+      type: 'text',
+      content: [
+        `Não encontrei eventos dos meus parceiros agora, mas fiz uma pesquisa extra pra te ajudar:\n`,
+        `🌐 ${fallbackText.trim()}`,
+        `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
+        `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
+        `\n💡 Dica do Zazil: ${dica}`
+      ].filter(Boolean).join('\n')
+    };
+  }
+
+  // Nothing found at all
   return {
     type: 'text',
-    content: header + lines
+    content: [
+      `📅 Não achei eventos brasileiros${city ? ` em ${city}` : ''} agora.`,
+      `Mas posso te avisar assim que surgir novidade por aqui!`,
+      `Quer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
+      `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
+      `\n💡 Dica do Zazil: ${dica}`
+    ].filter(Boolean).join('\n')
   };
 }
 
@@ -113,7 +149,6 @@ function amazon(items) {
   };
 }
 
-// --- Standard Fallback ---
 function fallback() {
   return {
     type: 'text',
@@ -121,7 +156,6 @@ function fallback() {
   };
 }
 
-// --- Outage Fallback (for Firebase etc) ---
 function fallbackOutage() {
   return {
     type: 'text',

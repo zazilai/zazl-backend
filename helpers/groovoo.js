@@ -3,7 +3,11 @@ const axios = require('axios');
 
 const API_URL = 'https://api.groovoo.app/events/search';
 
-// Common noise patterns to strip
+// Normalize/strip accents from city names for consistency
+function normalizeCity(city) {
+  return city ? city.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
+}
+
 const NOISE = [
   /algum evento (brasileiro|de brasileiro|de festa|de samba|br)/i,
   /evento( brasileiro)?/i,
@@ -16,24 +20,23 @@ const NOISE = [
 
 function extractCity(userMessage) {
   let lower = userMessage.toLowerCase();
-  // Remove common noise patterns
   NOISE.forEach(rgx => { lower = lower.replace(rgx, ''); });
-  // Now match "em <city>"
   const match = lower.match(/em\s+([a-zãéíóúç\s]+)/i);
   if (match) {
-    return match[1].trim();
+    return normalizeCity(match[1]);
   }
-  // fallback: grab last word if message ends with a city name
-  const words = lower.split(' ');
-  return words.length > 1 ? words[words.length - 1] : '';
+  // fallback: last word
+  const words = lower.trim().split(' ');
+  return normalizeCity(words.length > 1 ? words[words.length - 1] : '');
 }
 
 async function getEvents(userMessage) {
   try {
     console.log('[groovoo.js] getEvents() triggered with:', userMessage);
-
-    const city = extractCity(userMessage);
-    console.log('[groovoo.js] Detected city in message:', city);
+    let city = extractCity(userMessage);
+    if (!city) {
+      city = ''; // Optionally, set a default city or search all
+    }
 
     const params = {
       status: 1,
@@ -47,7 +50,7 @@ async function getEvents(userMessage) {
     const res = await axios.get(API_URL, { params });
     const data = res.data?.data || [];
 
-    console.log(`[groovoo.js] Received ${data.length} events from Groovoo API.`);
+    console.log(`[groovoo.js] Received ${data.length} events from Groovoo API.`, data);
 
     return data.map(evt => ({
       name: evt.name,

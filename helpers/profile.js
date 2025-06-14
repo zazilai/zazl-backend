@@ -9,7 +9,6 @@ async function load(db, waNumber) {
   let wasNew = false;
   const snap = await doc.get();
   if (!snap.exists) {
-    // New user, create basic profile with trial
     await doc.set({
       plan: 'trial',
       usage: {},
@@ -63,8 +62,82 @@ function getToday() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// ---- ALERT / OPT-IN / OPT-OUT LOGIC ----
+
+// Set the pending alert opt-in flag (expires in 5 min)
+async function setPendingAlertOptIn(db, waNumber, city) {
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min from now
+  await db.collection('profiles').doc(waNumber).set({
+    pendingAlertOptIn: { city, expiresAt }
+  }, { merge: true });
+}
+
+// Get pending alert opt-in (and clear if expired)
+async function getPendingAlertOptIn(db, waNumber) {
+  const doc = await db.collection('profiles').doc(waNumber).get();
+  if (!doc.exists) return null;
+  const pending = doc.data().pendingAlertOptIn;
+  if (!pending) return null;
+  if (Date.now() > pending.expiresAt) {
+    // Expired: clear it
+    await db.collection('profiles').doc(waNumber).update({ pendingAlertOptIn: admin.firestore.FieldValue.delete() });
+    return null;
+  }
+  return pending;
+}
+
+// Clear pending alert flag
+async function clearPendingAlertOptIn(db, waNumber) {
+  await db.collection('profiles').doc(waNumber).update({ pendingAlertOptIn: admin.firestore.FieldValue.delete() });
+}
+
+// Register alert for a city
+async function addAlert(db, waNumber, city) {
+  const docRef = db.collection('profiles').doc(waNumber);
+  const doc = await docRef.get();
+  const data = doc.exists ? doc.data() : {};
+  const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+  // Avoid duplicates
+  if (!alerts.some(a => a.city?.toLowerCase() === city?.toLowerCase())) {
+    alerts.push({ city, type: 'event', createdAt: new Date() });
+    await docRef.set({ alerts }, { merge: true });
+  }
+  // Always clear pending after register
+  await clearPendingAlertOptIn(db, waNumber);
+}
+
+// Remove alert for a city (opt-out)
+async function removeAlert(db, waNumber, city) {
+  const docRef = db.collection('profiles').doc(waNumber);
+  const doc = await docRef.get();
+  const data = doc.exists ? doc.data() : {};
+  const alerts = Array.isArray(data.alerts) ? data.alerts.filter(a => a.city?.toLowerCase() !== city?.toLowerCase()) : [];
+  await docRef.set({ alerts }, { merge: true });
+}
+
+// Checks if user has active alert for a city
+async function hasActiveAlert(db, waNumber, city) {
+  const doc = await db.collection('profiles').doc(waNumber).get();
+  if (!doc.exists) return false;
+  const alerts = doc.data().alerts || [];
+  return alerts.some(a => a.city?.toLowerCase() === city?.toLowerCase());
+}
+
+// Gets full profile (for pending opt-in and more)
+async function getProfile(db, waNumber) {
+  const doc = await db.collection('profiles').doc(waNumber).get();
+  return doc.exists ? doc.data() : {};
+}
+
 module.exports = {
   load,
   getQuotaStatus,
-  updateUsage
+  updateUsage,
+  setPendingAlertOptIn,
+  getPendingAlertOptIn,
+  clearPendingAlertOptIn,
+  addAlert,
+  removeAlert,
+  hasActiveAlert,
+  getProfile
 };

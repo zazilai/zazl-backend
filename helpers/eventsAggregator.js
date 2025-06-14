@@ -30,7 +30,8 @@ async function aggregateEvents(userMessage) {
   // Merge results (Groovoo first, then TM)
   const allEvents = [...groovooEvents, ...tmEvents];
 
-  return { events: allEvents, fallbackText };
+  // Always return city for further personalization
+  return { events: allEvents, fallbackText, city };
 }
 
 module.exports = { aggregateEvents };
