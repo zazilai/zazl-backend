@@ -16,7 +16,7 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-// Eventos: inclui imagem do evento no início do texto, preview WhatsApp
+// EVENTS — Now includes image link if present
 function events(list = []) {
   if (!list.length) {
     return {
@@ -25,15 +25,13 @@ function events(list = []) {
     };
   }
   const header = '🎉 *Eventos em Destaque:*\n\n';
-  const lines = list.map((evt, i) => {
-    // Exibe imagem para cada evento (pode limitar a só o primeiro se quiser)
-    let img = evt.image ? `${evt.image}\n` : '';
-    let info =
-      `🗓️ *${evt.name}*\n` +
-      `📍 ${evt.location}\n` +
-      `🕒 ${evt.start_time}\n` +
-      `🔗 ${evt.url}`;
-    return img + info;
+  const lines = list.map(evt => {
+    const date = evt.start_time || '';
+    const name = evt.name || '';
+    const location = evt.location || '';
+    const url = evt.url || '';
+    const image = evt.image ? `[🖼️ Ver imagem do evento](${evt.image})\n` : '';
+    return `${image}🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
   }).join('\n\n');
   return {
     type: 'text',
@@ -60,7 +58,7 @@ function welcome(waNumber) {
     type: 'text',
     content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro para vida no exterior 🇺🇸🇧🇷
 
-Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dólares por mês!
+Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dolares por mes!
 
 💡 Se quiser, para te ajudar melhor, já me conte de onde você está falando (ex: “Sou de Recife, moro em Austin com minha família”)! Assim eu personalizo ainda mais as respostas pra você.
 
@@ -68,7 +66,7 @@ Dicas rápidas:
 - Ainda não entendo áudios;
 - Prefiro perguntas completas em uma única mensagem.
 
-Dá pra assinar o plano agora também, é muito fácil:
+Da pra assinar o plano agora também, é muito fácil:
 🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
 🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
