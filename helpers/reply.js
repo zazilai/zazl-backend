@@ -26,7 +26,7 @@ function events(list = [], city = '', fallbackText = '') {
   ];
   const dica = dicas[Math.floor(Math.random() * dicas.length)];
 
-  if (list.length > 0) {
+  if (Array.isArray(list) && list.length > 0) {
     const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n\n`;
     const lines = list.map(evt => {
       const date = evt.start_time || '';
@@ -51,7 +51,7 @@ function events(list = [], city = '', fallbackText = '') {
     return {
       type: 'text',
       content: [
-        `Não encontrei eventos dos meus parceiros agora, mas fiz uma pesquisa extra pra te ajudar:\n`,
+        `Não encontrei eventos dos meus parceiros${city ? ` em ${city}` : ''}, mas fiz uma pesquisa extra pra te ajudar:\n`,
         `🌐 ${fallbackText.trim()}`,
         `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
         `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
@@ -72,6 +72,8 @@ function events(list = [], city = '', fallbackText = '') {
     ].filter(Boolean).join('\n')
   };
 }
+
+// ... keep the rest of your reply.js as-is, unchanged ...
 
 function news(digest = '') {
   if (!digest.trim()) {

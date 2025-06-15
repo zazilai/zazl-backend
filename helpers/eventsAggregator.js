@@ -4,20 +4,40 @@ const groovoo = require('./groovoo');
 const perplexityService = require('./perplexity');
 
 /**
- * Aggregates events for Zazil:
- * - Always tries Groovoo first (API for Brazilian events in USA)
- * - If Groovoo fails (network, server) or returns empty, falls back to Perplexity (news/LLM)
- * - Always returns { events: [], fallbackText } where at least one is non-empty
- * - Fallback text is generic but friendly for Zazil context
- * @param {string} message - user query (may include city, type, etc)
- * @returns {Promise<{ events: Array, fallbackText: string|null }>}
+ * Attempts to extract city from message or memory.
+ * (Can be improved with smarter NLP, but this covers basic cases)
  */
-async function aggregateEvents(message) {
-  // 1. Try Groovoo
+function extractCity(message = '', memory = '') {
+  const lower = (message + ' ' + memory).toLowerCase();
+  // Expand this list with more cities as needed
+  const cityList = [
+    'austin', 'miami', 'fort lauderdale', 'orlando', 'boston', 'houston', 'worcester', 'new york', 'dallas', 'atlanta', 'chicago'
+    // Add more as needed
+  ];
+  for (const city of cityList) {
+    if (lower.includes(city)) {
+      // Capitalize first letter
+      return city.replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }
+  return '';
+}
+
+/**
+ * Aggregates events for Zazil.
+ * @param {string} message - user query (may include city, type, etc)
+ * @param {string} memory - user memory string (optional)
+ * @returns {Promise<{ events: Array, fallbackText: string|null, city: string }>}
+ */
+async function aggregateEvents(message, memory = '') {
+  // Extract city
+  const city = extractCity(message, memory);
+
   let events = [];
   let error = false;
   try {
-    const result = await groovoo.getEvents(message);
+    // Optionally pass city to groovoo.getEvents if you want city filtering
+    const result = await groovoo.getEvents(message, city);
     events = result.events || [];
     error = !!result.error;
   } catch (e) {
@@ -26,23 +46,20 @@ async function aggregateEvents(message) {
     console.error('[eventsAggregator] Error with Groovoo:', e.message);
   }
 
-  // 2. If we got good events, return those
-  if (!error && Array.isArray(events) && events.length > 0) {
-    return { events, fallbackText: null };
-  }
-
-  // 3. If Groovoo fails or is empty, fallback to Perplexity (news/LLM)
   let fallbackText = null;
-  try {
-    const { answer } = await perplexityService.search(message);
-    fallbackText = answer && answer.trim() ? answer.trim() : 'Não encontrei eventos para sua busca no momento.';
-  } catch (e) {
-    fallbackText = 'Não consegui buscar eventos agora. Tente novamente mais tarde!';
-    console.error('[eventsAggregator] Perplexity fallback error:', e.message);
+  if (!error && Array.isArray(events) && events.length > 0) {
+    fallbackText = null;
+  } else {
+    try {
+      const { answer } = await perplexityService.search(message);
+      fallbackText = answer && answer.trim() ? answer.trim() : 'Não encontrei eventos para sua busca no momento.';
+    } catch (e) {
+      fallbackText = 'Não consegui buscar eventos agora. Tente novamente mais tarde!';
+      console.error('[eventsAggregator] Perplexity fallback error:', e.message);
+    }
   }
 
-  // Always return *something* (either .events or .fallbackText)
-  return { events: [], fallbackText };
+  return { events, fallbackText, city };
 }
 
 module.exports = { aggregateEvents };

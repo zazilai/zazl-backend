@@ -29,16 +29,6 @@ const app = express();
 
 const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
 
-// Utility to extract city from user memory summary
-function extractCityFromMemory(memorySummary = '') {
-  // Looks for "Mora em X" or "Cidade: X"
-  const cityMatch = memorySummary.match(/(?:mora em|cidade:)\s*([A-Za-zÀ-ÿ\s]+)/i);
-  if (cityMatch && cityMatch[1]) {
-    return cityMatch[1].trim();
-  }
-  return '';
-}
-
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -114,7 +104,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       memorySummary = '';
     }
 
-    // Intent detection (now using GPT-4.1 at temp=0.3)
+    // Intent detection (using GPT-4.1 at temp=0.3)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
@@ -127,13 +117,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'EVENT': {
-        const { events, fallbackText } = await eventsAggregator.aggregateEvents(incoming);
-
-        // If city not specified in message, pull from memory
-        let city = '';
-        if (!/(em|no|na|nos|nas)\s+[a-zà-ÿ]+/i.test(incoming) && memorySummary) {
-          city = extractCityFromMemory(memorySummary);
-        }
+        // Pass memorySummary for city personalization
+        const { events, fallbackText, city } = await eventsAggregator.aggregateEvents(incoming, memorySummary);
         replyObj = replyHelper.events(events, city, fallbackText);
         break;
       }
