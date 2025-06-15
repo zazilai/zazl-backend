@@ -28,12 +28,15 @@ const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
+
 const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
 
 // Stripe webhook route
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
+
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -61,9 +64,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     getPendingAlertOptIn,
     addAlert,
     clearPendingAlertOptIn,
-    hasActiveAlert,
-    removeAlert,
     getProfile,
+    removeAlert,
     setPendingAlertOptIn
   } = require('./helpers/profile');
   const AFFIRMATIVE_REGEX = /\b(sim|yes|quero( alerta)?|claro|pode ser)\b/i;
@@ -83,7 +85,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const userAlerts = Array.isArray(userProfile.alerts) ? userProfile.alerts : [];
   let matchedCity = '';
   if (userAlerts.length && OPTOUT_REGEX.test(incoming)) {
-    // Try to match city mentioned in message, otherwise remove all
     for (const alert of userAlerts) {
       if (incoming.toLowerCase().includes((alert.city || '').toLowerCase())) {
         matchedCity = alert.city;
@@ -95,7 +96,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       res.type('text/xml');
       return res.send(`<Response><Message>Pronto, não vou mais enviar alertas de eventos para ${matchedCity}. Se quiser reativar, é só pedir!</Message></Response>`);
     } else {
-      // Remove all alerts if no city specified
       for (const alert of userAlerts) {
         await removeAlert(db, waNumber, alert.city);
       }
@@ -164,11 +164,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     switch (intent) {
       case 'CANCEL': {
-        replyObj = replyHelper.cancel(waNumber);
+        const cancelMsg = replyHelper.cancel(waNumber);
+        replyObj = cancelMsg;
         break;
       }
       case 'EVENT': {
-        // EVENTS with fallback and city handling
+        // EVENTS with robust Perplexity fallback (never silent)
         const { events, fallbackText, city } = await eventsAggregator.aggregateEvents(incoming);
         eventsCity = city || '';
         if (events && events.length > 0) {
@@ -178,7 +179,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           replyObj = replyHelper.events([], city, fallbackText);
           if (city) await setPendingAlertOptIn(db, waNumber, city);
         } else {
-          replyObj = replyHelper.generic("Não encontrei nenhum evento relevante agora, mas continuo pesquisando novidades pra você! 😉");
+          // Defensive fallback: always try Perplexity as a last resort!
+          const { answer } = await perplexityService.search(incoming);
+          replyObj = replyHelper.generic(answer || 'Não consegui encontrar nenhuma informação relevante no momento, mas continuo pesquisando pra você!');
         }
         break;
       }
@@ -271,7 +274,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
     }
 
-    // Standardized fallback (never blank)
+    // Standardized fallback
     let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = replyObj.content;
