@@ -1,33 +1,52 @@
 // helpers/groovoo.js
 
 const axios = require('axios');
-const GROOVOO_API_URL = process.env.GROOVOO_API_URL || 'https://api.groovoo.com/events';
 
-async function getEvents(message) {
-  try {
-    // Basic city extraction logic
-    const cityMatch = message.match(/\bem ([a-zA-Z\s]+)$/i) || message.match(/em\s+([a-zA-Z\s]+)/i);
-    let city = cityMatch ? cityMatch[1].trim() : '';
-    if (city) city = city.toLowerCase();
-
-    const params = {
-      status: 1,
-      payed: true,
-      per_page: 10,
-    };
-    if (city) params.city = city;
-
-    console.log('[groovoo.js] Querying Groovoo API with params:', params);
-
-    const response = await axios.get(GROOVOO_API_URL, { params });
-    const events = response.data?.data || [];
-    return events;
-  } catch (err) {
-    console.error('[groovoo.js] Error fetching events:', err.message);
-    return [];
+// Helper: sanitize and extract city from message
+function extractCity(msg) {
+  // Simple city extraction: match after 'em' or 'em ' (future: use NLP for robustness)
+  const match = msg.match(/\bem ([a-z\s]+)[\?\.!]?/i);
+  if (match && match[1]) {
+    return match[1].trim();
   }
+  // If not found, try for common patterns, else return empty
+  return '';
 }
 
-module.exports = {
-  getEvents,
-};
+// Main function: fetch and filter events
+async function getEvents(message) {
+  let city = extractCity(message);
+  let allEvents = [];
+  try {
+    const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid Groovoo data');
+    }
+    allEvents = data;
+  } catch (err) {
+    console.error('[groovoo.js] Error fetching events:', err.message);
+    // Always return empty array + error so aggregator can fallback
+    return { events: [], error: true };
+  }
+
+  // Filter by city if present (case-insensitive, match on .city or .address.local_name)
+  let filtered = allEvents;
+  if (city) {
+    const cityLc = city.toLowerCase();
+    filtered = allEvents.filter(evt =>
+      (evt.address && (
+        (evt.address.city && evt.address.city.toLowerCase().includes(cityLc)) ||
+        (evt.address.local_name && evt.address.local_name.toLowerCase().includes(cityLc))
+      )) ||
+      (evt.name && evt.name.toLowerCase().includes(cityLc))
+    );
+  }
+
+  // Sort soonest first
+  filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+
+  // Limit to top 10
+  return { events: filtered.slice(0, 10), error: false };
+}
+
+module.exports = { getEvents };
