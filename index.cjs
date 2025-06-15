@@ -29,9 +29,7 @@ const app = express();
 
 const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
 
-// Stripe webhook route
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
-
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
@@ -41,7 +39,6 @@ app.use(viewRoute);
 
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
-// Dollar rate route
 app.get('/api/dolar', async (req, res) => {
   try {
     const rateObj = await dolarService.getRate();
@@ -51,58 +48,10 @@ app.get('/api/dolar', async (req, res) => {
   }
 });
 
-// WhatsApp webhook
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
-
-  // --- ALERT OPT-IN / OPT-OUT SHORT-CIRCUIT ---
-  const {
-    getPendingAlertOptIn,
-    addAlert,
-    clearPendingAlertOptIn,
-    hasActiveAlert,
-    removeAlert,
-    getProfile,
-    setPendingAlertOptIn
-  } = require('./helpers/profile');
-  const AFFIRMATIVE_REGEX = /\b(sim|yes|quero( alerta)?|claro|pode ser)\b/i;
-  const OPTOUT_REGEX = /\b(parar avis(o|os)?|cancelar( alerta)?|stop( alert)?|remover( alerta)?|não quero( mais)?( alerta)?)\b/i;
-
-  // 1. Check if user has a pending opt-in and their message is affirmative
-  const pendingOptIn = await getPendingAlertOptIn(db, waNumber);
-  if (pendingOptIn && pendingOptIn.city && AFFIRMATIVE_REGEX.test(incoming)) {
-    await addAlert(db, waNumber, pendingOptIn.city);
-    res.type('text/xml');
-    return res.send(`<Response><Message>Fechado! Vou te avisar quando rolar novidade de evento brasileiro em ${pendingOptIn.city}.</Message></Response>`);
-  }
-
-  // 2. Check if user wants to opt-out of event alerts for any city they're subscribed to
-  const userProfile = await getProfile(db, waNumber);
-  const userAlerts = Array.isArray(userProfile.alerts) ? userProfile.alerts : [];
-  let matchedCity = '';
-  if (userAlerts.length && OPTOUT_REGEX.test(incoming)) {
-    // Try to match city mentioned in message, otherwise remove all
-    for (const alert of userAlerts) {
-      if (incoming.toLowerCase().includes((alert.city || '').toLowerCase())) {
-        matchedCity = alert.city;
-        break;
-      }
-    }
-    if (matchedCity) {
-      await removeAlert(db, waNumber, matchedCity);
-      res.type('text/xml');
-      return res.send(`<Response><Message>Pronto, não vou mais enviar alertas de eventos para ${matchedCity}. Se quiser reativar, é só pedir!</Message></Response>`);
-    } else {
-      // Remove all alerts if no city specified
-      for (const alert of userAlerts) {
-        await removeAlert(db, waNumber, alert.city);
-      }
-      res.type('text/xml');
-      return res.send(`<Response><Message>Pronto, não vou mais enviar alertas de eventos para você. Se quiser reativar, é só pedir!</Message></Response>`);
-    }
-  }
 
   try {
     // Onboarding for new users
@@ -160,7 +109,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     console.log('[twilio] classifyIntent →', intent);
 
     let replyObj;
-    let eventsCity = '';
 
     switch (intent) {
       case 'CANCEL': {
@@ -169,18 +117,13 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         break;
       }
       case 'EVENT': {
-        const { events, fallbackText, city } = await eventsAggregator.aggregateEvents(incoming);
-        eventsCity = city || '';
+        const { events, fallbackText } = await eventsAggregator.aggregateEvents(incoming);
         if (events && events.length > 0) {
-          replyObj = replyHelper.events(events, city, fallbackText);
+          replyObj = replyHelper.events(events);
         } else if (fallbackText) {
-          replyObj = replyHelper.events([], city, fallbackText);
+          replyObj = replyHelper.generic(fallbackText);
         } else {
-          replyObj = replyHelper.events([], city);
-        }
-        // Set pending alert opt-in for this city (for next 5 min)
-        if (eventsCity) {
-          await setPendingAlertOptIn(db, waNumber, eventsCity);
+          replyObj = replyHelper.events([]);
         }
         break;
       }
