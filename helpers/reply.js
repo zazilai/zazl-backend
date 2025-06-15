@@ -16,7 +16,8 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-function events(list = [], city = '', fallbackText = '') {
+// Improved events function with clean Perplexity fallback!
+function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
     'Convide amigos — quanto mais gente, melhor!',
@@ -26,7 +27,6 @@ function events(list = [], city = '', fallbackText = '') {
   ];
   const dica = dicas[Math.floor(Math.random() * dicas.length)];
 
-  // 1. If we have events, show them
   if (list.length > 0) {
     const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n\n`;
     const lines = list.map(evt => {
@@ -47,21 +47,15 @@ function events(list = [], city = '', fallbackText = '') {
     };
   }
 
-  // 2. If fallbackText (from Perplexity), show “busca extra”
+  // If Perplexity fallback is present, just return it directly (no "eventos dos parceiros" text)
   if (fallbackText && fallbackText.trim().length > 10) {
     return {
       type: 'text',
-      content: [
-        `Não encontrei eventos dos meus parceiros agora, mas fiz uma pesquisa extra pra te ajudar:\n`,
-        `🌐 ${fallbackText.trim()}`,
-        `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
-        `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
-        `\n💡 Dica do Zazil: ${dica}`
-      ].filter(Boolean).join('\n')
+      content: fallbackText.trim()
     };
   }
 
-  // 3. Absolutely nothing found (should basically never happen with current aggregator)
+  // Nothing found at all
   return {
     type: 'text',
     content: [

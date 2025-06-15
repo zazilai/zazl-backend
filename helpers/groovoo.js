@@ -18,7 +18,7 @@ async function getEvents(message) {
   let city = extractCity(message);
   let allEvents = [];
   try {
-    const { data } = await axios.get('https://api.groovoo.io/ticketing_event');
+    const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
     if (!Array.isArray(data)) {
       throw new Error('Invalid Groovoo data');
     }
