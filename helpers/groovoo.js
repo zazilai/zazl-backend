@@ -1,62 +1,65 @@
 // helpers/groovoo.js
 const axios = require('axios');
+
 const API_URL = 'https://api.groovoo.io/ticketing_events';
 
-function normalize(str) {
-  return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : '';
+// Normalize/strip accents from city names for consistency
+function normalizeCity(city) {
+  return city ? city.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
 }
 
+const NOISE = [
+  /algum evento (brasileiro|de brasileiro|de festa|de samba|br)/i,
+  /evento( brasileiro)?/i,
+  /festa( brasileira)?/i,
+  /show(s)?( brasileiro)?/i,
+  /tem/i,
+  /algum/i,
+  /brasileiro/i
+];
+
 function extractCity(userMessage) {
-  const match = userMessage.toLowerCase().match(/em\s+([a-zãéíóúç\s]+)/i);
-  return match ? normalize(match[1]) : '';
+  let lower = userMessage.toLowerCase();
+  NOISE.forEach(rgx => { lower = lower.replace(rgx, ''); });
+  const match = lower.match(/em\s+([a-zãéíóúç\s]+)/i);
+  if (match) {
+    return normalizeCity(match[1]);
+  }
+  // fallback: last word
+  const words = lower.trim().split(' ');
+  return normalizeCity(words.length > 1 ? words[words.length - 1] : '');
 }
 
 async function getEvents(userMessage) {
   try {
-    const city = extractCity(userMessage);
-    const res = await axios.get(API_URL, { headers: { 'Accept': 'application/json' } });
-    const events = Array.isArray(res.data) ? res.data : res.data.data || [];
-    console.log('[groovoo.js] RAW events from API:', events.length);
-
-    // Filtra eventos futuros
-    let filtered = events.filter(evt =>
-      evt.status === 1 &&
-      evt.payed === true &&
-      evt.start_at && new Date(evt.start_at) > new Date()
-    );
-
-    // Se cidade informada, filtra por cidade normalizada
-    if (city) {
-      filtered = filtered.filter(evt =>
-        evt.address &&
-        normalize(evt.address.city || '') === city
-      );
+    console.log('[groovoo.js] getEvents() triggered with:', userMessage);
+    let city = extractCity(userMessage);
+    if (!city) {
+      city = ''; // Optionally, set a default city or search all
     }
 
-    console.log('[groovoo.js] Filtered events:', filtered.length, '| City:', city);
+    const params = {
+      status: 1,
+      city: city || undefined,
+      payed: true,
+      per_page: 10
+    };
 
-    filtered = filtered.sort(
-      (a, b) => new Date(a.start_at) - new Date(b.start_at)
-    ).slice(0, 6);
+    console.log('[groovoo.js] Querying Groovoo API with params:', params);
 
-    return filtered.map(evt => ({
+    const res = await axios.get(API_URL, { params });
+    const data = res.data?.data || [];
+
+    console.log(`[groovoo.js] Received ${data.length} events from Groovoo API.`, data);
+
+    return data.map(evt => ({
       name: evt.name,
-      start_time: new Date(evt.start_at).toLocaleString('pt-BR', {
-        day: '2-digit', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-        timeZone: evt.timezone || 'America/New_York'
-      }),
-      location: evt.address?.local_name ||
-                (evt.address?.city ? `${evt.address.city}, ${evt.address.state || ''}`.trim() : ''),
-      url: evt.external_shop_url || evt.voucher || `https://www.groovooapp.com/events/${evt.alias}`,
-      image: evt.images?.[0]?.url_image || ''
+      start_time: evt.start_at?.slice(0, 10),
+      location: evt.city || evt.venue || '',
+      url: evt.voucher?.includes('groovoo') ? evt.voucher.split(' ').pop() : evt.voucher || ''
     }));
   } catch (err) {
-    if (err.response) {
-      console.error('[groovoo.js] Error response:', err.response.status, err.response.data);
-    } else {
-      console.error('[groovoo.js] Error fetching events:', err.message);
-    }
+    console.error('[groovoo.js] Error fetching events:', err.message);
     return [];
   }
 }
