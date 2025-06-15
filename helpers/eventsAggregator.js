@@ -4,62 +4,48 @@ const groovoo = require('./groovoo');
 const perplexityService = require('./perplexity');
 
 /**
- * Attempts to extract city from message or memory.
- * (Can be improved with smarter NLP, but this covers basic cases)
- */
-function extractCity(message = '', memory = '') {
-  const lower = (message + ' ' + memory).toLowerCase();
-  // Expand this list with more cities as needed
-  const cityList = [
-    'austin', 'miami', 'fort lauderdale', 'orlando', 'boston', 'houston', 'worcester', 'new york', 'dallas', 'atlanta', 'chicago'
-    // Add more as needed
-  ];
-  for (const city of cityList) {
-    if (lower.includes(city)) {
-      // Capitalize first letter
-      return city.replace(/\b\w/g, l => l.toUpperCase());
-    }
-  }
-  return '';
-}
-
-/**
- * Aggregates events for Zazil.
+ * Aggregates events for Zazil:
+ * - Always tries Groovoo first (API for Brazilian events in USA)
+ * - If Groovoo fails (network, server) OR returns empty, falls back to Perplexity (news/LLM)
+ * - Always returns { events: [], fallbackText, city } where at least one is non-empty
  * @param {string} message - user query (may include city, type, etc)
- * @param {string} memory - user memory string (optional)
+ * @param {string} memory - user memory (for default city if needed)
  * @returns {Promise<{ events: Array, fallbackText: string|null, city: string }>}
  */
 async function aggregateEvents(message, memory = '') {
-  // Extract city
-  const city = extractCity(message, memory);
-
   let events = [];
   let error = false;
+  let city = '';
   try {
-    // Optionally pass city to groovoo.getEvents if you want city filtering
-    const result = await groovoo.getEvents(message, city);
+    const result = await groovoo.getEvents(message, memory);
     events = result.events || [];
-    error = !!result.error;
+    city = result.city || '';
+    // Even if Groovoo returns 0 events, treat as error for user experience!
+    if (!Array.isArray(events) || events.length === 0) error = true;
   } catch (e) {
     error = true;
     events = [];
+    city = '';
     console.error('[eventsAggregator] Error with Groovoo:', e.message);
   }
 
-  let fallbackText = null;
-  if (!error && Array.isArray(events) && events.length > 0) {
-    fallbackText = null;
-  } else {
-    try {
-      const { answer } = await perplexityService.search(message);
-      fallbackText = answer && answer.trim() ? answer.trim() : 'Não encontrei eventos para sua busca no momento.';
-    } catch (e) {
-      fallbackText = 'Não consegui buscar eventos agora. Tente novamente mais tarde!';
-      console.error('[eventsAggregator] Perplexity fallback error:', e.message);
-    }
+  // Only reply with Groovoo if we truly have events!
+  if (!error && events.length > 0) {
+    return { events, fallbackText: null, city };
   }
 
-  return { events, fallbackText, city };
+  // Always fallback to Perplexity if Groovoo failed OR returned 0 events
+  let fallbackText = null;
+  try {
+    const { answer } = await perplexityService.search(message);
+    fallbackText = answer && answer.trim() ? answer.trim() : 'Não encontrei eventos para sua busca no momento.';
+  } catch (e) {
+    fallbackText = 'Não consegui buscar eventos agora. Tente novamente mais tarde!';
+    console.error('[eventsAggregator] Perplexity fallback error:', e.message);
+  }
+
+  // Always return *something*
+  return { events: [], fallbackText, city };
 }
 
 module.exports = { aggregateEvents };
