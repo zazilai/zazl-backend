@@ -60,9 +60,6 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
     type: 'text',
     content: [
       `📅 Não achei eventos brasileiros${city ? ` em ${city}` : ''} agora.`,
-      `Mas posso te avisar assim que surgir novidade por aqui!`,
-      `Quer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
-      `\nConhece algum evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui pra ajudar a divulgar! 🇧🇷✨`,
       `\n💡 Dica do Zazil: ${dica}`
     ].filter(Boolean).join('\n')
   };
