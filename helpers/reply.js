@@ -40,9 +40,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
       type: 'text',
       content: [
         header + lines,
-        `\n💡 Dica do Zazil: ${dica}`,
-        `\nQuer receber alertas de novos eventos? Só responder “sim” nos próximos 5 minutos.`,
-        `\nConhece outro evento brasileiro${city ? ` em ${city}` : ''}? Me mande aqui que ajudo a divulgar!`
+        `\n💡 Dica do Zazil: ${dica}`
       ].filter(Boolean).join('\n')
     };
   }
@@ -84,7 +82,7 @@ function welcome(waNumber) {
     type: 'text',
     content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro para vida no exterior 🇺🇸🇧🇷
 
-Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dolares por mes!
+Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dólares por mês!
 
 💡 Se quiser, para te ajudar melhor, já me conte de onde você está falando (ex: “Sou de Recife, moro em Austin com minha família”)! Assim eu personalizo ainda mais as respostas pra você.
 
@@ -121,11 +119,19 @@ Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@wo
   };
 }
 
+// Great Product Amazon logic: GPT keyword, Perplexity fallback, cool Zazil touch
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
       type: 'text',
       content: '🔎 Não encontrei produtos relevantes na Amazon agora. Tente buscar de outra forma ou com palavras mais específicas!'
+    };
+  }
+  // Perplexity fallback: if .answer is present, it's a non-Amazon answer
+  if (items[0].answer) {
+    return {
+      type: 'text',
+      content: `Não achei produtos relevantes na Amazon, mas fiz uma busca extra pra te ajudar:\n\n${items[0].answer}`
     };
   }
   const dica = "\n\n💡 Dica do Zazil: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";

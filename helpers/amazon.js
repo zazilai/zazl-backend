@@ -1,41 +1,61 @@
 // helpers/amazon.js
-
 const axios = require('axios');
 const crypto = require('crypto');
+const { OpenAI } = require('openai');
+const perplexityService = require('./perplexity');
 
-// Environment variables
 const ACCESS_KEY = process.env.AMAZON_PA_ACCESS_KEY;
 const SECRET_KEY = process.env.AMAZON_PA_SECRET_KEY;
 const PARTNER_TAG = process.env.AMAZON_PA_PARTNER_TAG;
-const MARKET = process.env.AMAZON_PA_MARKET || 'www.amazon.com';
+const MARKETPLACE = process.env.AMAZON_PA_MARKET || 'www.amazon.com';
 const REGION = 'us-east-1';
-const SERVICE = 'ProductAdvertisingAPI';
 const HOST = 'webservices.amazon.com';
 const ENDPOINT = `https://${HOST}/paapi5/searchitems`;
 
-// === Signature helpers (AWS SigV4) ===
-function hash(content) {
-  return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Utility for AWS SigV4
+function sign(key, msg) {
+  return crypto.createHmac('sha256', key).update(msg).digest();
 }
-function hmac(key, data) {
-  return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
-}
-function getSignatureKey(key, dateStamp, regionName, serviceName) {
-  const kDate = hmac('AWS4' + key, dateStamp);
-  const kRegion = hmac(kDate, regionName);
-  const kService = hmac(kRegion, serviceName);
-  const kSigning = hmac(kService, 'aws4_request');
+function getSignatureKey(key, date, region, service) {
+  const kDate = sign('AWS4' + key, date);
+  const kRegion = sign(kDate, region);
+  const kService = sign(kRegion, service);
+  const kSigning = sign(kService, 'aws4_request');
   return kSigning;
 }
 
-// === Main function ===
+// Extract main keywords using GPT-4.1
+async function extractKeywords(query) {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4.1',
+      temperature: 0.2,
+      max_tokens: 10,
+      messages: [
+        {
+          role: 'system',
+          content: 'Sua tarefa é extrair o termo de busca mais eficiente para encontrar um produto físico na Amazon a partir da pergunta do usuário. Responda com uma única palavra ou frase curta, sem explicação. Exemplos: "Onde compro farofa?" → "farofa", "Quero uma Airfryer boa" → "Airfryer", "Preciso de tênis de corrida masculino" → "tênis de corrida masculino".'
+        },
+        { role: 'user', content: query }
+      ]
+    });
+    return response.choices?.[0]?.message?.content?.trim() || query;
+  } catch (err) {
+    console.error('[Amazon extractKeywords] error:', err);
+    return query;
+  }
+}
+
 async function searchAmazonProducts(query) {
-  // 1. Build payload
+  const keywords = await extractKeywords(query);
+
   const payload = {
-    Keywords: query,
+    Keywords: keywords,
     PartnerTag: PARTNER_TAG,
     PartnerType: 'Associates',
-    Marketplace: MARKET,
+    Marketplace: MARKETPLACE,
     ItemCount: 3,
     SearchIndex: 'All',
     Resources: [
@@ -47,70 +67,78 @@ async function searchAmazonProducts(query) {
   };
   const payloadJson = JSON.stringify(payload);
 
-  // 2. Create timestamp and date
+  // Date/time in AWS format
   const now = new Date();
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '') + 'Z'; // e.g. 20240616T200000Z
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
 
-  // 3. Canonical headers and signed headers
-  const canonicalHeaders =
-    `content-type:application/json; charset=utf-8\n` +
-    `host:${HOST}\n` +
-    `x-amz-date:${amzDate}\n`;
-  const signedHeaders = 'content-type;host;x-amz-date';
-
-  // 4. Canonical request
-  const canonicalRequest =
-    'POST\n' +
-    '/paapi5/searchitems\n' +
-    '\n' +
-    canonicalHeaders +
-    '\n' +
-    signedHeaders +
-    '\n' +
-    hash(payloadJson);
-
-  // 5. String to sign
-  const credentialScope = `${dateStamp}/${REGION}/${SERVICE}/aws4_request`;
-  const stringToSign =
-    'AWS4-HMAC-SHA256\n' +
-    amzDate + '\n' +
-    credentialScope + '\n' +
-    hash(canonicalRequest);
-
-  // 6. Calculate signature
-  const signingKey = getSignatureKey(SECRET_KEY, dateStamp, REGION, SERVICE);
-  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign, 'utf8').digest('hex');
-
-  // 7. Authorization header
-  const authorizationHeader =
-    `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  // 8. Final request
+  // Canonical request
   const headers = {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Host': HOST,
-    'X-Amz-Date': amzDate,
-    'Authorization': authorizationHeader,
+    'content-type': 'application/json; charset=utf-8',
+    host: HOST,
+    'x-amz-target': 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems',
+    'x-amz-date': amzDate,
+    'x-amz-content-sha256': crypto.createHash('sha256').update(payloadJson).digest('hex'),
   };
+  const canonicalHeaders = Object.entries(headers)
+    .map(([k, v]) => `${k}:${v}`)
+    .sort()
+    .join('\n') + '\n';
+  const signedHeaders = Object.keys(headers).sort().join(';');
+  const canonicalRequest = [
+    'POST',
+    '/paapi5/searchitems',
+    '',
+    canonicalHeaders,
+    signedHeaders,
+    headers['x-amz-content-sha256']
+  ].join('\n');
+  const credentialScope = `${dateStamp}/${REGION}/ProductAdvertisingAPI/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex')
+  ].join('\n');
+  const signingKey = getSignatureKey(SECRET_KEY, dateStamp, REGION, 'ProductAdvertisingAPI');
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+  const authorizationHeader = [
+    `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}`,
+    `SignedHeaders=${signedHeaders}`,
+    `Signature=${signature}`
+  ].join(', ');
 
   try {
-    const response = await axios.post(ENDPOINT, payloadJson, { headers, timeout: 6000 });
+    const response = await axios.post(ENDPOINT, payloadJson, {
+      headers: {
+        ...headers,
+        Authorization: authorizationHeader
+      }
+    });
+
     const items = response.data?.SearchResult?.Items || [];
+    // Map to a clean array for reply
     return items.map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
       image: item.Images?.Primary?.Large?.URL,
       url: item.DetailPageURL
     }));
-  } catch (error) {
-    // Defensive logging for debugging
-    console.error('[Amazon API fallback] fetch failed:', {
-      message: error?.message,
-      data: error?.response?.data,
-      query
-    });
-    return [];
+  } catch (err) {
+    // Log and fallback to Perplexity
+    console.error('[Amazon API Great Product fetch failed]:', err.response?.data || err.message);
+    // Fallback: Perplexity
+    const { answer } = await perplexityService.search(query);
+    return [
+      {
+        title: 'Resultado alternativo',
+        price: '',
+        image: '',
+        url: '',
+        answer: answer || 'Não encontrei produtos relevantes na Amazon agora. Tente buscar de outra forma ou com palavras mais específicas!'
+      }
+    ];
   }
 }
 
