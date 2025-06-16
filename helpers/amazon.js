@@ -1,33 +1,22 @@
 // helpers/amazon.js
-const crypto = require('crypto');
+const aws4 = require('aws4');
 const axios = require('axios');
 
-const ACCESS_KEY = process.env.AMAZON_ACCESS_KEY;
-const SECRET_KEY = process.env.AMAZON_SECRET_KEY;
-const PARTNER_TAG = 'zazilai-20';
-const REGION = 'us-east-1';
+const ACCESS_KEY = process.env.AMAZON_PA_ACCESS_KEY;
+const SECRET_KEY = process.env.AMAZON_PA_SECRET_KEY;
+const PARTNER_TAG = process.env.AMAZON_PA_PARTNER_TAG || 'zazilai-20';
+const MARKETPLACE = process.env.AMAZON_PA_MARKET || 'www.amazon.com';
+
 const HOST = 'webservices.amazon.com';
-const URI = '/paapi5/searchitems';
-const ENDPOINT = `https://${HOST}${URI}`;
-
-function sign(key, msg) {
-  return crypto.createHmac('sha256', key).update(msg).digest();
-}
-
-function getSignatureKey(key, date, region, service) {
-  const kDate = sign(Buffer.from('AWS4' + key, 'utf8'), date);
-  const kRegion = sign(kDate, region);
-  const kService = sign(kRegion, service);
-  const kSigning = sign(kService, 'aws4_request');
-  return kSigning;
-}
+const REGION = 'us-east-1';
+const ENDPOINT = `https://${HOST}/paapi5/searchitems`;
 
 async function searchAmazonProducts(query) {
   const payload = {
     Keywords: query,
     PartnerTag: PARTNER_TAG,
     PartnerType: 'Associates',
-    Marketplace: 'www.amazon.com',
+    Marketplace: MARKETPLACE,
     Resources: [
       'ItemInfo.Title',
       'Offers.Listings.Price',
@@ -36,43 +25,31 @@ async function searchAmazonProducts(query) {
     ]
   };
 
-  const payloadJson = JSON.stringify(payload);
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[:\-]|\..*/g, '');
-  const dateStamp = amzDate.slice(0, 8);
-
-  const headers = {
-    'content-type': 'application/json; charset=utf-8',
-    'host': HOST,
-    'x-amz-target': 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems',
-    'x-amz-date': amzDate,
-    'x-amz-content-sha256': crypto.createHash('sha256').update(payloadJson).digest('hex'),
+  const requestOptions = {
+    host: HOST,
+    method: 'POST',
+    url: ENDPOINT,
+    path: '/paapi5/searchitems',
+    service: 'ProductAdvertisingAPI',
+    region: REGION,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(payload)
   };
 
-  const canonicalHeaders = Object.entries(headers)
-    .map(([k, v]) => `${k}:${v}`)
-    .sort()
-    .join('\n') + '\n';
-
-  const signedHeaders = Object.keys(headers).sort().join(';');
-
-  const canonicalRequest = `POST\n${URI}\n\n${canonicalHeaders}\n${signedHeaders}\n${headers['x-amz-content-sha256']}`;
-
-  const credentialScope = `${dateStamp}/${REGION}/ProductAdvertisingAPI/aws4_request`;
-  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${crypto.createHash('sha256').update(canonicalRequest).digest('hex')}`;
-
-  const signingKey = getSignatureKey(SECRET_KEY, dateStamp, REGION, 'ProductAdvertisingAPI');
-  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-
-  const authorizationHeader = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  // Sign the request with aws4
+  aws4.sign(requestOptions, {
+    accessKeyId: ACCESS_KEY,
+    secretAccessKey: SECRET_KEY
+  });
 
   try {
-    const response = await axios.post(ENDPOINT, payloadJson, {
-      headers: {
-        ...headers,
-        Authorization: authorizationHeader
-      }
-    });
+    const response = await axios.post(
+      ENDPOINT,
+      payload,
+      { headers: requestOptions.headers }
+    );
 
     const items = response.data?.SearchResult?.Items || [];
     return items.slice(0, 3).map(item => ({
