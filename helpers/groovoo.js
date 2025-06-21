@@ -1,39 +1,41 @@
 // helpers/groovoo.js
+
 const axios = require('axios');
 
-// Helper: extract city from message (simple match after "em")
-function extractCity(msg) {
-  const match = msg.match(/\bem ([a-z\s]+)[\?\.!]?/i);
-  if (match && match[1]) return match[1].trim();
-  return '';
-}
-
-// Main: fetch events, filter by city if possible
-async function getEvents(messageOrCity) {
-  let city = typeof messageOrCity === 'string' ? extractCity(messageOrCity) : '';
-  let allEvents = [];
+/**
+ * Returns up to 3 formatted Groovoo event strings for a city, for use in "Dica do Zazil".
+ * If no city is provided, returns up to 3 soonest events overall.
+ * If nothing is found or fetch fails, returns ''.
+ */
+async function getGroovooDica(city = '') {
   try {
     const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
-    allEvents = Array.isArray(data) ? data : [];
+    if (!Array.isArray(data)) return '';
+
+    const cityLc = (city || '').trim().toLowerCase();
+    const filtered = cityLc
+      ? data.filter(evt =>
+          (evt.address?.city && evt.address.city.toLowerCase().includes(cityLc)) ||
+          (evt.address?.local_name && evt.address.local_name.toLowerCase().includes(cityLc)) ||
+          (evt.name && evt.name.toLowerCase().includes(cityLc))
+        )
+      : data;
+
+    if (!filtered.length) return '';
+
+    return filtered.slice(0, 3).map(evt => {
+      const name = evt.name || '';
+      const date = evt.start_at
+        ? new Date(evt.start_at).toLocaleString('pt-BR', { timeZone: 'America/New_York' })
+        : '';
+      const location = evt.address?.local_name || evt.address?.city || '';
+      const url = evt.url || '';
+      return `🗓️ *${name}*\n📍 ${location}\n🗓️ ${date}\n🔗 [Ingressos](${url})`;
+    }).join('\n\n');
   } catch (err) {
-    console.error('[groovoo.js] Error fetching events:', err.message);
-    return []; // Always return array, never null or error obj
+    console.error('[Groovoo Dica] fetch failed:', err.message);
+    return '';
   }
-  // Filter events by city if present
-  if (city) {
-    const cityLc = city.toLowerCase();
-    allEvents = allEvents.filter(evt =>
-      (evt.address && (
-        (evt.address.city && evt.address.city.toLowerCase().includes(cityLc)) ||
-        (evt.address.local_name && evt.address.local_name.toLowerCase().includes(cityLc))
-      )) ||
-      (evt.name && evt.name.toLowerCase().includes(cityLc))
-    );
-  }
-  // Sort soonest first, limit 10
-  return allEvents
-    .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
-    .slice(0, 10);
 }
 
-module.exports = { getEvents };
+module.exports = { getGroovooDica };
