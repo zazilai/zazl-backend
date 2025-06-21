@@ -1,41 +1,51 @@
 // helpers/groovoo.js
 const axios = require('axios');
 
-// Helper: extract city from the message
-function extractCity(msg) {
-  const match = msg.match(/\bem ([a-z\s]+)[\?\.!]?/i);
-  return match && match[1] ? match[1].trim() : '';
+// Utility: remove accents and normalize for robust city matching
+function normalize(text) {
+  if (!text) return '';
+  return text
+    .normalize('NFD') // Normalize to decompose accents
+    .replace(/[\u0300-\u036f]/g, '') // Remove accents
+    .toLowerCase()
+    .trim();
 }
 
-// Main function to fetch events
+// Extract city from the user's message (looks for "em <city>")
+function extractCity(msg) {
+  const match = msg.match(/\bem\s+([a-zA-Z\s]+)/i);
+  if (match && match[1]) {
+    return normalize(match[1]);
+  }
+  return '';
+}
+
 async function getEvents(message) {
-  let city = extractCity(message);
-  let allEvents = [];
+  // Try to extract city from the message
+  const searchCity = extractCity(message);
+  let events = [];
   try {
     const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
-    if (!Array.isArray(data)) throw new Error('Invalid Groovoo data');
-    allEvents = data;
+    if (!Array.isArray(data)) throw new Error('Groovoo API: Unexpected response');
+    events = data;
   } catch (err) {
-    console.error('[groovoo.js] Error fetching events:', err.message);
+    console.error('[Groovoo] API error:', err.message);
     return { events: [], error: true };
   }
 
-  // Filter by city if present
-  let filtered = allEvents;
-  if (city) {
-    const cityLc = city.toLowerCase();
-    filtered = allEvents.filter(evt =>
-      (evt.address && (
-        (evt.address.city && evt.address.city.toLowerCase().includes(cityLc)) ||
-        (evt.address.local_name && evt.address.local_name.toLowerCase().includes(cityLc))
-      )) ||
-      (evt.name && evt.name.toLowerCase().includes(cityLc))
-    );
+  // If city present, filter by city (normalized match, robust to accents/case)
+  let filtered = events;
+  if (searchCity) {
+    filtered = events.filter(e => {
+      const eventCity = normalize(e.address?.city);
+      const localName = normalize(e.address?.local_name);
+      // Match against both address.city and address.local_name
+      return eventCity.includes(searchCity) || localName.includes(searchCity);
+    });
   }
 
-  // Sort soonest first
+  // Sort by soonest
   filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-  // Limit to top 10
   return { events: filtered.slice(0, 10), error: false };
 }
 
