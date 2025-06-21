@@ -56,6 +56,7 @@ async function searchAmazonProducts(query) {
     PartnerTag: PARTNER_TAG,
     PartnerType: 'Associates',
     Marketplace: MARKETPLACE,
+    Operation: 'SearchItems', // <-- CRITICAL! Add this line
     ItemCount: 3,
     SearchIndex: 'All',
     Resources: [
