@@ -28,17 +28,21 @@ async function getDica({ intent, message, city }) {
 
   // 3. Events — Groovoo integration
   if (intent === 'EVENT') {
-    let searchCity = city || '';
+    let searchCity = city && typeof city === 'string' ? city.trim() : '';
     let searchMsg = searchCity ? `eventos em ${searchCity}` : message;
     try {
       const { events } = await groovoo.getEvents(searchMsg);
       if (events && events.length) {
         const e = events[0];
-        // Choose best available URL
-        let eventUrl = e.url || e.facebook || '';
-        let cityText = e.address?.city || searchCity || '';
-        // Dica text
-        return `Evento parceiro Groovoo: *${e.name}* em ${cityText}${eventUrl ? `, [ver ingressos aqui](${eventUrl})` : ''}.`;
+        // Try all possible event URL fields (external_shop_url is often Groovoo's sales link)
+        let eventUrl = e.external_shop_url || e.url || e.facebook_link || e.instagram_link || '';
+        let cityText = (e.address && e.address.city) ? e.address.city : (searchCity || '');
+        // Remove empty parens if city or URL missing
+        let dica = `Evento parceiro Groovoo: *${e.name}*`;
+        if (cityText) dica += ` em ${cityText}`;
+        if (eventUrl) dica += `, [ver ingressos aqui](${eventUrl})`;
+        dica += '.';
+        return dica;
       }
       // If no events for city
       return 'Ainda não temos eventos parceiros Groovoo nesta cidade, mas fique de olho nas novidades!';

@@ -7,14 +7,12 @@ const perplexityService = require('./perplexity');
 const ACCESS_KEY = process.env.AMAZON_PA_ACCESS_KEY;
 const SECRET_KEY = process.env.AMAZON_PA_SECRET_KEY;
 const PARTNER_TAG = process.env.AMAZON_PA_PARTNER_TAG;
-// No need for MARKETPLACE env anymore – hardcoded US for reliability
 const REGION = 'us-east-1';
 const HOST = 'webservices.amazon.com';
 const ENDPOINT = `https://${HOST}/paapi5/searchitems`;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// --- AWS Signature helpers ---
 function sign(key, msg) {
   return crypto.createHmac('sha256', key).update(msg).digest();
 }
@@ -26,7 +24,6 @@ function getSignatureKey(key, date, region, service) {
   return kSigning;
 }
 
-// --- GPT-4.1 keyword extraction ---
 async function extractKeywords(query) {
   try {
     const response = await openai.chat.completions.create({
@@ -36,7 +33,7 @@ async function extractKeywords(query) {
       messages: [
         {
           role: 'system',
-          content: 'Extraia o termo de busca mais eficiente para encontrar um produto físico na Amazon, a partir da pergunta do usuário. Responda com uma única palavra ou frase curta, sem explicação. Exemplos: "Onde compro farofa?" → "farofa", "Quero uma Airfryer boa" → "Airfryer", "Preciso de tênis de corrida masculino" → "tênis de corrida masculino".'
+          content: 'Extraia o termo de busca mais eficiente para encontrar um produto físico na Amazon a partir da pergunta do usuário. Apenas o termo, sem explicação.'
         },
         { role: 'user', content: query }
       ]
@@ -55,7 +52,8 @@ async function searchAmazonProducts(query) {
     Keywords: keywords,
     PartnerTag: PARTNER_TAG,
     PartnerType: 'Associates',
-    Marketplace: 'www.amazon.com',      // <-- HARD-CODED, literal string!
+    Marketplace: 'www.amazon.com',
+    Operation: 'SearchItems', // <-- Required!
     ItemCount: 3,
     SearchIndex: 'All',
     Resources: [
@@ -67,14 +65,15 @@ async function searchAmazonProducts(query) {
   };
   const payloadJson = JSON.stringify(payload);
 
-  // --- AWS date/time ---
+  // AWS date/time
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
 
-  // --- Canonical request ---
+  // Canonical request (includes all headers used in actual HTTP request!)
   const headers = {
     'content-type': 'application/json; charset=utf-8',
+    'content-encoding': 'amz-1.0',
     host: HOST,
     'x-amz-target': 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems',
     'x-amz-date': amzDate,
@@ -118,7 +117,6 @@ async function searchAmazonProducts(query) {
     });
 
     const items = response.data?.SearchResult?.Items || [];
-    // Return clean array for reply
     return items.map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,

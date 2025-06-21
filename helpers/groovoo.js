@@ -1,41 +1,42 @@
 // helpers/groovoo.js
-
 const axios = require('axios');
 
-/**
- * Returns up to 3 formatted Groovoo event strings for a city, for use in "Dica do Zazil".
- * If no city is provided, returns up to 3 soonest events overall.
- * If nothing is found or fetch fails, returns ''.
- */
-async function getGroovooDica(city = '') {
-  try {
-    const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
-    if (!Array.isArray(data)) return '';
-
-    const cityLc = (city || '').trim().toLowerCase();
-    const filtered = cityLc
-      ? data.filter(evt =>
-          (evt.address?.city && evt.address.city.toLowerCase().includes(cityLc)) ||
-          (evt.address?.local_name && evt.address.local_name.toLowerCase().includes(cityLc)) ||
-          (evt.name && evt.name.toLowerCase().includes(cityLc))
-        )
-      : data;
-
-    if (!filtered.length) return '';
-
-    return filtered.slice(0, 3).map(evt => {
-      const name = evt.name || '';
-      const date = evt.start_at
-        ? new Date(evt.start_at).toLocaleString('pt-BR', { timeZone: 'America/New_York' })
-        : '';
-      const location = evt.address?.local_name || evt.address?.city || '';
-      const url = evt.url || '';
-      return `🗓️ *${name}*\n📍 ${location}\n🗓️ ${date}\n🔗 [Ingressos](${url})`;
-    }).join('\n\n');
-  } catch (err) {
-    console.error('[Groovoo Dica] fetch failed:', err.message);
-    return '';
-  }
+// Helper: extract city from the message
+function extractCity(msg) {
+  const match = msg.match(/\bem ([a-z\s]+)[\?\.!]?/i);
+  return match && match[1] ? match[1].trim() : '';
 }
 
-module.exports = { getGroovooDica };
+// Main function to fetch events
+async function getEvents(message) {
+  let city = extractCity(message);
+  let allEvents = [];
+  try {
+    const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
+    if (!Array.isArray(data)) throw new Error('Invalid Groovoo data');
+    allEvents = data;
+  } catch (err) {
+    console.error('[groovoo.js] Error fetching events:', err.message);
+    return { events: [], error: true };
+  }
+
+  // Filter by city if present
+  let filtered = allEvents;
+  if (city) {
+    const cityLc = city.toLowerCase();
+    filtered = allEvents.filter(evt =>
+      (evt.address && (
+        (evt.address.city && evt.address.city.toLowerCase().includes(cityLc)) ||
+        (evt.address.local_name && evt.address.local_name.toLowerCase().includes(cityLc))
+      )) ||
+      (evt.name && evt.name.toLowerCase().includes(cityLc))
+    );
+  }
+
+  // Sort soonest first
+  filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+  // Limit to top 10
+  return { events: filtered.slice(0, 10), error: false };
+}
+
+module.exports = { getEvents };
