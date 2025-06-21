@@ -60,7 +60,6 @@ async function searchAmazonProducts(query) {
       'ItemInfo.Title',
       'Offers.Listings.Price',
       'Images.Primary.Large',
-      'DetailPageURL'
     ]
   };
   const payloadJson = JSON.stringify(payload);
