@@ -1,17 +1,15 @@
 // helpers/groovoo.js
 const axios = require('axios');
 
-// Utility: remove accents and normalize for robust city matching
 function normalize(text) {
   if (!text) return '';
   return text
-    .normalize('NFD') // Normalize to decompose accents
-    .replace(/[\u0300-\u036f]/g, '') // Remove accents
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
 }
 
-// Extract city from the user's message (looks for "em <city>")
 function extractCity(msg) {
   const match = msg.match(/\bem\s+([a-zA-Z\s]+)/i);
   if (match && match[1]) {
@@ -21,8 +19,9 @@ function extractCity(msg) {
 }
 
 async function getEvents(message) {
-  // Try to extract city from the message
   const searchCity = extractCity(message);
+  console.log('[Groovoo] Search city extracted:', searchCity);
+
   let events = [];
   try {
     const { data } = await axios.get('https://api.groovoo.io/ticketing_events');
@@ -33,14 +32,23 @@ async function getEvents(message) {
     return { events: [], error: true };
   }
 
-  // If city present, filter by city (normalized match, robust to accents/case)
+  // DEBUG: Log all cities for first 10 events
+  console.log('[Groovoo] First 10 event cities:', events.slice(0, 10).map(e => ({
+    city: e.address?.city,
+    local_name: e.address?.local_name
+  })));
+
   let filtered = events;
   if (searchCity) {
     filtered = events.filter(e => {
       const eventCity = normalize(e.address?.city);
       const localName = normalize(e.address?.local_name);
-      // Match against both address.city and address.local_name
-      return eventCity.includes(searchCity) || localName.includes(searchCity);
+      const found = eventCity.includes(searchCity) || localName.includes(searchCity);
+      // DEBUG: Log every city checked
+      if (found) {
+        console.log(`[Groovoo] MATCH: Query [${searchCity}] matched with event city [${eventCity}] or local_name [${localName}]`);
+      }
+      return found;
     });
   }
 
