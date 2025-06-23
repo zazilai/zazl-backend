@@ -11,7 +11,7 @@ function dolar(rate) {
   };
 }
 
-// Events: WhatsApp-safe, max 3 events, minimal markdown
+// Events: WhatsApp-safe, max 3 events, minimal formatting
 function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
@@ -70,7 +70,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
   };
 }
 
-// Amazon: WhatsApp-safe, max 2 products, minimal markdown
+// Amazon: WhatsApp-safe, max 2 products, plain URLs, concise
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -89,6 +89,7 @@ function amazon(items) {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
+    // WhatsApp: only plain URL
     return url
       ? `🛒 ${title}\n💰 ${price}\nComprar: ${url}`
       : `🛒 ${title}\n💰 ${price}`;
