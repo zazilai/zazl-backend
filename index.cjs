@@ -182,7 +182,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     } else {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
-
+    
+    console.log('[index.cjs] Outgoing reply:', safeContent, '\nLength:', safeContent.length);
+    
     res.type('text/xml');
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {

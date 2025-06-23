@@ -7,16 +7,16 @@ function generic(content) {
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 *Cotação do Dólar Hoje:*
+    content: `💵 Cotação do Dólar Hoje:
 
 US$ 1 = R$ ${rate.buy}
 
 Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
-👉 https://remit.ly/1bh2ujzp`
+https://remit.ly/1bh2ujzp`
   };
 }
 
-// Events: supports all buy/info/ticket links and formats with Brazilian touch
+// Events: Production fix — MAX 3 events, minimal markdown, safe for WhatsApp
 function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
@@ -28,8 +28,9 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dica = dicas[Math.floor(Math.random() * dicas.length)];
 
   if (Array.isArray(list) && list.length > 0) {
-    const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n`;
-    const lines = list.map(evt => {
+    const header = `🎉 Eventos Brasileiros${city ? ` em ${city}` : ''}:\n`;
+    // Max 3 events for WhatsApp safety
+    const lines = list.slice(0, 3).map(evt => {
       const name = evt.name || 'Evento';
       const location = (evt.address && evt.address.local_name) || evt.location || '';
       const dateIso = evt.start_at || evt.start_time || '';
@@ -48,11 +49,12 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
           formattedDate = `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
         } catch {}
       }
+      // Minimal markdown: no asterisks, links are plain
       return [
-        `🗓️ *${name}*`,
+        `🗓️ ${name}`,
         location ? `📍 ${location}` : '',
         formattedDate ? `🕒 ${formattedDate}` : '',
-        eventUrl ? `🔗 [Ingressos / Info](${eventUrl})` : ''
+        eventUrl ? `Mais informações: ${eventUrl}` : ''
       ].filter(Boolean).join('\n');
     }).join('\n\n');
     return {
@@ -60,7 +62,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
       content: [
         header,
         lines,
-        `\n💡 Dica do Zazil: ${dica}`
+        `\nDica do Zazil: ${dica}`
       ].filter(Boolean).join('\n')
     };
   }
@@ -78,68 +80,12 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
     type: 'text',
     content: [
       `📅 Não achei eventos brasileiros${city ? ` em ${city}` : ''} agora.`,
-      `\n💡 Dica do Zazil: ${dica}`
+      `\nDica do Zazil: ${dica}`
     ].filter(Boolean).join('\n')
   };
 }
 
-function news(digest = '') {
-  if (!digest.trim()) {
-    return {
-      type: 'text',
-      content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
-    };
-  }
-  return {
-    type: 'text',
-    content: `🗞️ *Resumo de Notícias:*\n\n${digest}`
-  };
-}
-
-function welcome(waNumber) {
-  const clean = waNumber.replace(/^whatsapp:/, '');
-  return {
-    type: 'text',
-    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro para vida no exterior 🇺🇸🇧🇷
-
-Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dólares por mês!
-
-💡 Se quiser, para te ajudar melhor, já me conte de onde você está falando (ex: “Sou de Recife, moro em Austin com minha família”)! Assim eu personalizo ainda mais as respostas pra você.
-
-Dicas rápidas:
-- Ainda não entendo áudios;
-- Prefiro perguntas completas em uma única mensagem.
-
-Da pra assinar o plano agora também, é muito fácil:
-🟢 Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-🔵 Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
-
-Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
-  };
-}
-
-function upgrade(waNumber) {
-  const clean = waNumber.replace(/^whatsapp:/, '');
-  return {
-    type: 'text',
-    content: `🔒 Você atingiu seu limite diário de mensagens.
-
-Assine o plano *Pro ilimitado* para continuar usando o Zazil sem limites:
-👉 https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}`
-  };
-}
-
-function cancel(waNumber) {
-  const clean = waNumber.replace(/^whatsapp:/, '');
-  return {
-    type: 'text',
-    content: `❌ Para gerenciar ou cancelar sua assinatura do Zazil, acesse o painel seguro da Stripe aqui:\nhttps://zazl-backend.onrender.com/gerenciar?wa=${clean}
-
-Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@worldofbrazil.ai`
-  };
-}
-
-// Amazon: safe for all fallback scenarios, always USA
+// Amazon: safe for WhatsApp, MAX 2 products, minimal markdown
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -153,19 +99,77 @@ function amazon(items) {
       content: `Não achei produtos relevantes na Amazon, mas fiz uma busca extra pra te ajudar:\n\n${items[0].answer}`
     };
   }
-  const dica = "\n\n💡 Dica do Zazil: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";
-  const top = items.map(i => {
+  // Limit to 2 products for WhatsApp safety
+  const dica = "\n\nDica: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";
+  const top = items.slice(0, 2).map(i => {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
-    // Defensive: some products might not have a URL
+    // No asterisks, no link markdown — only plain text
     return url
-      ? `🛒 *${title}*\n💰 ${price}\n🔗 [Comprar na Amazon](${url})`
-      : `🛒 *${title}*\n💰 ${price}`;
+      ? `🛒 ${title}\n💰 ${price}\nComprar: ${url}`
+      : `🛒 ${title}\n💰 ${price}`;
   }).join('\n\n');
   return {
     type: 'text',
-    content: `✨ *Dica do Zazil: Produtos recomendados na Amazon*\n\n${top}${dica}`
+    content: `Produtos recomendados na Amazon:\n\n${top}${dica}`
+  };
+}
+
+function news(digest = '') {
+  if (!digest.trim()) {
+    return {
+      type: 'text',
+      content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
+    };
+  }
+  return {
+    type: 'text',
+    content: `🗞️ Resumo de Notícias:\n\n${digest}`
+  };
+}
+
+function welcome(waNumber) {
+  const clean = waNumber.replace(/^whatsapp:/, '');
+  return {
+    type: 'text',
+    content: `👋 Prazer em te conhecer! Eu sou o Zazil, seu assistente brasileiro para vida no exterior 🇺🇸🇧🇷
+
+Você pode testar o Zazil gratuitamente por 7 dias! Depois disso, se quiser continuar falando comigo, você pode assinar um dos nossos planos, a partir $5 dólares por mês!
+
+Dica: Já me conte de onde você está falando (ex: “Sou de Recife, moro em Austin com minha família”)! Assim eu personalizo ainda mais as respostas pra você.
+
+Dicas rápidas:
+- Ainda não entendo áudios;
+- Prefiro perguntas completas em uma única mensagem.
+
+Assine agora:
+Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+
+Ao usar o Zazil, você aceita nossos Termos: https://worldofbrazil.ai/termos e Privacidade: https://worldofbrazil.ai/privacidade.`
+  };
+}
+
+function upgrade(waNumber) {
+  const clean = waNumber.replace(/^whatsapp:/, '');
+  return {
+    type: 'text',
+    content: `🔒 Você atingiu seu limite diário de mensagens.
+
+Assine o plano Pro ilimitado para continuar usando o Zazil sem limites:
+https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}`
+  };
+}
+
+function cancel(waNumber) {
+  const clean = waNumber.replace(/^whatsapp:/, '');
+  return {
+    type: 'text',
+    content: `❌ Para gerenciar ou cancelar sua assinatura do Zazil, acesse o painel seguro da Stripe aqui:
+https://zazl-backend.onrender.com/gerenciar?wa=${clean}
+
+Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@worldofbrazil.ai`
   };
 }
 
@@ -183,7 +187,6 @@ function fallbackOutage() {
   };
 }
 
-// NOVO: Trial Expirado
 function trialExpired(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
@@ -192,8 +195,8 @@ function trialExpired(waNumber) {
 
 Para continuar usando o Zazil, escolha um plano mensal a partir de apenas $5 por mês:
 
-🟢 Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-🔵 Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
 Dúvidas? É só responder aqui ou mandar email para zazil@worldofbrazil.ai`
   };
