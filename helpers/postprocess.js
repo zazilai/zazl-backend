@@ -3,18 +3,16 @@
 /**
  * "Zazil-izes" only generic/news answers for personality and trust,
  * but NEVER changes FX, events, amazon, or cancel replies.
- * Now also removes all [N] reference markers everywhere for cleanliness.
+ * Also removes all [N] reference markers everywhere for cleanliness.
  * For AMAZON and GENERIC, if it mentions Brazilian stores, appends a U.S.-store recommendation.
- *
- * @param {object} replyObj - The reply object (with .content)
- * @param {string} question - The user question (optional, safe default)
- * @param {string} intent - The classified intent (e.g., FX, AMAZON, GENERIC, CANCEL, etc)
- * @returns {object} The adjusted replyObj, safe to send
  */
 
 const BRAZILIAN_RETAILERS = [
   'magazine luiza', 'magalu', 'mercado livre', 'casas bahia', 'americanas',
   'ponto frio', 'submarino', 'extra.com', 'carrefour', 'centauro', 'fast shop'
+];
+const US_STORES = [
+  'Amazon', 'Best Buy', 'Walmart', 'Target', 'Costco', 'Sam’s Club'
 ];
 
 function mentionsBrazilianRetailer(text) {
@@ -25,7 +23,6 @@ function mentionsBrazilianRetailer(text) {
 // Remove all [N] style reference markers anywhere in the text
 function cleanCitations(text) {
   if (!text) return '';
-  // Removes all instances of [number] everywhere in the text (e.g. [1], [2], [15])
   return text.replace(/\s*\[\d+\]/g, '').replace(/\s+$/, '');
 }
 
@@ -37,7 +34,7 @@ module.exports = function postprocess(replyObj, question = '', intent = '') {
 
   // If AMAZON or GENERIC and mentions Brazilian retailer, add the dica!
   if ((intent === 'AMAZON' || intent === 'GENERIC') && mentionsBrazilianRetailer(replyObj.content)) {
-    replyObj.content += '\n\n💡 Dica do Zazil: Nos EUA, os sites mais confiáveis são Amazon, Best Buy, Walmart, Target, ou lojas locais.';
+    replyObj.content += `\n\n💡 Dica do Zazil: Nos EUA, prefira comprar nas lojas confiáveis como ${US_STORES.join(', ')} ou sites locais.`;
   }
 
   // Zazil-ize generic/news/factual AI answers
@@ -47,6 +44,14 @@ module.exports = function postprocess(replyObj, question = '', intent = '') {
       replyObj.content += '\n\n💡 Dica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
     }
   }
+
+  // Last resort: if reply is still empty (should never happen)
+  if (!replyObj.content.trim()) {
+    replyObj.content = "Foi mal, não consegui encontrar uma resposta agora. Tente novamente em alguns minutos, ou pergunte de outro jeito!";
+  }
+
+  // Clean up any accidental double newlines
+  replyObj.content = replyObj.content.replace(/\n{3,}/g, '\n\n');
 
   return replyObj;
 };

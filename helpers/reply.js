@@ -16,6 +16,7 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
+// Event formatter: always tries to use buy_link/external_shop_url, formats nicely!
 function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
@@ -26,24 +27,45 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
   ];
   const dica = dicas[Math.floor(Math.random() * dicas.length)];
 
-  if (list.length > 0) {
-    const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n\n`;
+  if (Array.isArray(list) && list.length > 0) {
+    const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n`;
     const lines = list.map(evt => {
-      const date = evt.start_time || '';
-      const name = evt.name || '';
-      const location = evt.location || '';
-      const url = evt.url || '';
-      return `🗓️ *${name}*\n📍 ${location}\n🕒 ${date}\n🔗 ${url}`;
+      const name = evt.name || 'Evento';
+      const location = (evt.address && (evt.address.local_name || evt.address.city)) || evt.location || '';
+      const dateIso = evt.start_at || evt.start_time || '';
+      const url =
+        evt.external_shop_url ||
+        evt.buy_link ||
+        evt.url ||
+        evt.facebook_link ||
+        evt.instagram_link ||
+        '';
+      // Date formatting: "2025-12-31T21:00:00.000Z" → 31/12/2025 às 21:00
+      let formattedDate = '';
+      if (dateIso) {
+        try {
+          const d = new Date(dateIso);
+          formattedDate = `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+        } catch {}
+      }
+      return [
+        `🗓️ *${name}*`,
+        location ? `📍 ${location}` : '',
+        formattedDate ? `🕒 ${formattedDate}` : '',
+        url ? `🔗 [Ingressos / Info](${url})` : ''
+      ].filter(Boolean).join('\n');
     }).join('\n\n');
     return {
       type: 'text',
       content: [
-        header + lines,
+        header,
+        lines,
         `\n💡 Dica do Zazil: ${dica}`
       ].filter(Boolean).join('\n')
     };
   }
 
+  // If fallback from Perplexity or similar is present
   if (fallbackText && fallbackText.trim().length > 10) {
     return {
       type: 'text',
@@ -51,6 +73,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
     };
   }
 
+  // If nothing found at all
   return {
     type: 'text',
     content: [
@@ -87,9 +110,9 @@ Dicas rápidas:
 - Ainda não entendo áudios;
 - Prefiro perguntas completas em uma única mensagem.
 
-Da pra assinar o plano agora também, é muito fácil:
-🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+Da pra assinar o plano mensal agora também, é muito fácil:
+🟢 Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+🔵 Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
 Ao usar o Zazil, você aceita nossos [Termos](https://worldofbrazil.ai/termos) e [Privacidade](https://worldofbrazil.ai/privacidade).`
   };
@@ -116,6 +139,7 @@ Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@wo
   };
 }
 
+// Amazon: always formats for US audience, uses url if present, handles Perplexity fallback
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -134,7 +158,9 @@ function amazon(items) {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
-    return `🛒 *${title}*\n💰 ${price}\n🔗 [Comprar na Amazon](${url})`;
+    return url
+      ? `🛒 *${title}*\n💰 ${price}\n🔗 [Comprar na Amazon](${url})`
+      : `🛒 *${title}*\n💰 ${price}`;
   }).join('\n\n');
   return {
     type: 'text',
@@ -156,7 +182,6 @@ function fallbackOutage() {
   };
 }
 
-// NOVO: Trial Expirado
 function trialExpired(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
@@ -165,8 +190,8 @@ function trialExpired(waNumber) {
 
 Para continuar usando o Zazil, escolha um plano a partir de apenas $5 por mês:
 
-🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
-🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+🟢 Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+🔵 Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
 Dúvidas? É só responder aqui ou mandar email para zazil@worldofbrazil.ai`
   };

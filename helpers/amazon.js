@@ -1,5 +1,4 @@
 // helpers/amazon.js
-
 const axios = require('axios');
 const crypto = require('crypto');
 const { OpenAI } = require('openai');
@@ -14,6 +13,7 @@ const ENDPOINT = `https://${HOST}/paapi5/searchitems`;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// --- AWS SigV4 helpers ---
 function sign(key, msg) {
   return crypto.createHmac('sha256', key).update(msg).digest();
 }
@@ -25,7 +25,7 @@ function getSignatureKey(key, date, region, service) {
   return kSigning;
 }
 
-// Extracts search term for Amazon US (GPT guidance, no keyword hack)
+// --- Keyword extraction (always for US Amazon, never other stores!) ---
 async function extractKeywords(query) {
   try {
     const response = await openai.chat.completions.create({
@@ -35,11 +35,7 @@ async function extractKeywords(query) {
       messages: [
         {
           role: 'system',
-          content: `Extraia apenas o termo de busca ideal para procurar esse produto físico na Amazon dos EUA. 
-Exemplo:
-"Onde compro raquete de tênis?" → "tennis racket"
-"Onde comprar panela de pressão?" → "pressure cooker"
-Retorne apenas o termo em inglês (se possível), sem explicações, nem aspas.`
+          content: 'Extraia apenas o termo ideal para buscar um produto físico na Amazon dos EUA a partir da pergunta do usuário. Apenas o termo, sem explicação ou menção a outros países ou lojas.'
         },
         { role: 'user', content: query }
       ]
@@ -51,6 +47,7 @@ Retorne apenas o termo em inglês (se possível), sem explicações, nem aspas.`
   }
 }
 
+// --- Core Amazon product search, always returns up to 3 best items ---
 async function searchAmazonProducts(query) {
   const keywords = await extractKeywords(query);
 
@@ -66,17 +63,15 @@ async function searchAmazonProducts(query) {
       'ItemInfo.Title',
       'Offers.Listings.Price',
       'Images.Primary.Large'
-      // Do NOT include 'DetailPageURL' here
+      // No DetailPageURL in request; still comes in response
     ]
   };
   const payloadJson = JSON.stringify(payload);
 
-  // AWS date/time
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
 
-  // Canonical request (includes all headers used in actual HTTP request!)
   const headers = {
     'content-type': 'application/json; charset=utf-8',
     'content-encoding': 'amz-1.0',
@@ -123,20 +118,17 @@ async function searchAmazonProducts(query) {
     });
 
     const items = response.data?.SearchResult?.Items || [];
-    // Always access DetailPageURL from response (do not put it in Resources!)
+    // Always map DetailPageURL, even if not in Resources — Amazon returns it
     return items.map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
       image: item.Images?.Primary?.Large?.URL,
-      url: item.DetailPageURL
+      url: item.DetailPageURL // Safe: always in response if present
     }));
   } catch (err) {
     // Log and fallback to Perplexity
     console.error('[Amazon API Great Product fetch failed]:', err.response?.data || err.message);
-    // Give GPT one more shot at a US-specific, clear answer (Perplexity fallback)
-    const { answer } = await perplexityService.search(
-      `${query}\n\nSó mostre lojas e links dos EUA, especialmente Amazon.com. Não cite sites brasileiros.`
-    );
+    const { answer } = await perplexityService.search(query);
     return [
       {
         title: 'Resultado alternativo',
