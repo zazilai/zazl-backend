@@ -16,7 +16,7 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-// Event formatter: always tries to use buy_link/external_shop_url, formats nicely!
+// Events: supports all buy/info/ticket links and formats with Brazilian touch
 function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
@@ -31,11 +31,11 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
     const header = `🎉 *Eventos Brasileiros${city ? ` em ${city}` : ''}:*\n`;
     const lines = list.map(evt => {
       const name = evt.name || 'Evento';
-      const location = (evt.address && (evt.address.local_name || evt.address.city)) || evt.location || '';
+      const location = (evt.address && evt.address.local_name) || evt.location || '';
       const dateIso = evt.start_at || evt.start_time || '';
-      const url =
-        evt.external_shop_url ||
+      let eventUrl =
         evt.buy_link ||
+        evt.external_shop_url ||
         evt.url ||
         evt.facebook_link ||
         evt.instagram_link ||
@@ -52,7 +52,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
         `🗓️ *${name}*`,
         location ? `📍 ${location}` : '',
         formattedDate ? `🕒 ${formattedDate}` : '',
-        url ? `🔗 [Ingressos / Info](${url})` : ''
+        eventUrl ? `🔗 [Ingressos / Info](${eventUrl})` : ''
       ].filter(Boolean).join('\n');
     }).join('\n\n');
     return {
@@ -110,7 +110,7 @@ Dicas rápidas:
 - Ainda não entendo áudios;
 - Prefiro perguntas completas em uma única mensagem.
 
-Da pra assinar o plano mensal agora também, é muito fácil:
+Da pra assinar o plano agora também, é muito fácil:
 🟢 Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
 🔵 Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
 
@@ -139,7 +139,7 @@ Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@wo
   };
 }
 
-// Amazon: always formats for US audience, uses url if present, handles Perplexity fallback
+// Amazon: safe for all fallback scenarios, always USA
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -158,6 +158,7 @@ function amazon(items) {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
+    // Defensive: some products might not have a URL
     return url
       ? `🛒 *${title}*\n💰 ${price}\n🔗 [Comprar na Amazon](${url})`
       : `🛒 *${title}*\n💰 ${price}`;
@@ -182,13 +183,14 @@ function fallbackOutage() {
   };
 }
 
+// NOVO: Trial Expirado
 function trialExpired(waNumber) {
   const clean = waNumber.replace(/^whatsapp:/, '');
   return {
     type: 'text',
     content: `Seu período de teste gratuito de 7 dias acabou! 😢
 
-Para continuar usando o Zazil, escolha um plano a partir de apenas $5 por mês:
+Para continuar usando o Zazil, escolha um plano mensal a partir de apenas $5 por mês:
 
 🟢 Lite $4.99 (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
 🔵 Pro $9.99 (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}

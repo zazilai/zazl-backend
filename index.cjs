@@ -1,4 +1,5 @@
-// index.cjs — Zazil v2 (Marketplace-Ready, Perplexity-First)
+// index.cjs — Zazil (Marketplace-Ready, Perplexity-First, Never Silent)
+
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -9,7 +10,7 @@ const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const profileSvc = require('./helpers/profile');
-const dicaSvc = require('./helpers/dica');
+const dicaSvc = require('./helpers/dica');        // Marketplace engine, ADDITIVE
 const perplexityService = require('./helpers/perplexity');
 const postprocess = require('./helpers/postprocess');
 const memorySvc = require('./helpers/memory');
@@ -25,9 +26,12 @@ const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
+const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
+
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
@@ -40,7 +44,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
-    // Onboarding for new users
+    // 1. Onboarding for new users
     const { wasNew } = await profileSvc.load(db, waNumber);
     if (wasNew) {
       const welcomeMsg = replyHelper.welcome(waNumber);
@@ -48,21 +52,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
-    // Plan limit check (also checks for expired trial!)
+    // 2. Plan limit check
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
-      // Trial expired = specific message
-      if (quota.plan === 'trial' && quota.trialExpired) {
-        const expiredMsg = replyHelper.trialExpired(waNumber);
-        res.type('text/xml');
-        return res.send(`<Response><Message>${expiredMsg.content}</Message></Response>`);
-      }
       const upgradeMsg = replyHelper.upgrade(waNumber);
       res.type('text/xml');
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // Robust CANCEL detection (before intent)
+    // 3. Robust CANCEL detection (before intent)
     const incomingLower = incoming.toLowerCase();
     if (
       /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(incomingLower) ||
@@ -78,7 +76,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // Greeting detection
+    // 4. Greeting detection
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
@@ -87,7 +85,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // Personalization: Load memory (city, context)
+    // 5. Personalization: Load memory (city, context)
     let profileDoc, memorySummary = '', city = 'EUA';
     try {
       profileDoc = await db.collection('profiles').doc(waNumber).get();
@@ -95,46 +93,55 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : 'EUA';
     } catch (e) { city = 'EUA'; }
 
-    // Intent detection
+    // 6. Intent detection (GPT-4.1)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
-    // === GREAT PRODUCT LOGIC: ALWAYS GET MAIN ANSWER FIRST ===
+    // 7. *** MAIN ANSWER: Perplexity FIRST ***
     let mainAnswer = '';
     try {
-      // Perplexity first (events always specify city, shopping specify "nos EUA")
       let prompt = incoming;
-      if (intent === 'EVENT' && city && city !== 'EUA') {
-        prompt = `Eventos brasileiros em ${city} nas próximas semanas`;
-      }
-      if (intent === 'AMAZON') {
-        prompt = `${incoming} comprar nos EUA (Amazon, Walmart, BestBuy)`;
+      if (city && city !== 'EUA' && !incoming.toLowerCase().includes(city.toLowerCase())) {
+        prompt = `${incoming} em ${city}`;
       }
       const { answer } = await perplexityService.search(prompt);
       mainAnswer = answer || '';
-    } catch (e) {
-      // Fallback: OpenAI
-      try {
-        const prompt = `Responda para um brasileiro nos EUA: ${incoming}`;
-        const response = await openai.chat.completions.create({
+      if (!mainAnswer || mainAnswer.length < 3) {
+        // Fallback: OpenAI/GPT-4.1 if Perplexity gives nothing
+        const gpt = await openai.chat.completions.create({
           model: 'gpt-4.1',
-          temperature: 0.4,
-          max_tokens: 400,
+          temperature: 0.3,
+          max_tokens: 2048,
           messages: [
-            { role: 'system', content: 'Você é um assistente brasileiro especialista em vida prática nos EUA.' },
-            { role: 'user', content: prompt }
+            { role: 'system', content: ZAZIL_PROMPT },
+            { role: 'user', content: incoming }
           ]
         });
-        mainAnswer = response.choices?.[0]?.message?.content?.trim() || '';
-      } catch (err) {
-        mainAnswer = '';
+        mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
       }
+    } catch (err) {
+      // Double fallback to OpenAI if even Perplexity fails
+      const gpt = await openai.chat.completions.create({
+        model: 'gpt-4.1',
+        temperature: 0.3,
+        max_tokens: 2048,
+        messages: [
+          { role: 'system', content: ZAZIL_PROMPT },
+          { role: 'user', content: incoming }
+        ]
+      });
+      mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
     }
 
-    // === ENRICH WITH DICA DO ZAZIL (Marketplace/Partner layer) ===
-    const dicaSection = await dicaSvc.getDica({ intent, message: incoming, city });
+    // 8. *** "Dica do Zazil" — ADDITIVE Marketplace/Partner Layer ***
+    let dicaSection = '';
+    try {
+      dicaSection = await dicaSvc.getDica({ intent, message: incoming, city });
+    } catch (e) {
+      dicaSection = ''; // Never block main answer
+    }
 
-    // Compose the reply: always mainAnswer first, dica is optional enrichment
+    // 9. Compose the reply: Main Answer FIRST, Dica if available
     const finalContent = [
       mainAnswer.trim(),
       dicaSection ? `\n\n💡 *Dica do Zazil*: ${dicaSection}` : ''
@@ -142,11 +149,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     let replyObj = replyHelper.generic(finalContent);
 
-    // Postprocess (clean citations, add "Dica do Zazil" if needed)
+    // 10. Postprocess (cleans up, applies US-bias, etc)
     replyObj = postprocess(replyObj, incoming, intent);
 
-    // Memory update
+    // 11. Memory update (same as before)
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
+
     if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
       try {
         const profileDoc = db.collection('profiles').doc(waNumber);
@@ -162,15 +170,19 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       } catch (e) { console.error('[MEMORY] Outer error:', e); }
     }
 
-    // Always respond
+    // 12. Fallback for empty replyObj
     let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = replyObj.content;
+    } else {
+      console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
+
     res.type('text/xml');
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
+    // OUTAGE FALLBACK for Firestore/Firebase/network error
     if (
       (err.message && err.message.match(/firestore|firebase|unavailable|timeout|network/i)) ||
       (err.code && err.code.toString().includes('unavailable'))

@@ -2,39 +2,49 @@
 
 const axios = require('axios');
 const { OpenAI } = require('openai');
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Uses OpenAI to extract the city from a user's query.
- * Returns the city name or "" if none found.
+ * If fails, fallback to basic regex or keyword detection.
  */
 async function extractCityFromQuery(query) {
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4.1',
       temperature: 0,
       max_tokens: 8,
       messages: [
         {
           role: 'system',
-          content: `
-Sua tarefa é extrair o nome da cidade ou localidade da pergunta do usuário, mesmo que o usuário mencione "eventos brasileiros em X" ou apenas "eventos em X". Responda apenas com o nome da cidade ou "" se não houver. Exemplos:
+          content: `Sua tarefa é extrair o nome da cidade ou localidade da pergunta do usuário. Se não houver cidade, responda só com "". Exemplos:
 "Quais eventos em Boston?" → "Boston"
 "Eventos hoje em Fort Lauderdale?" → "Fort Lauderdale"
 "Tem festa brasileira em Miami?" → "Miami"
-"Quais eventos?" → ""
-"Temos eventos brasileiros em Miami?" → "Miami"
-"Temos eventos em Miami?" → "Miami"
-"Eventos brasileiros em Houston?" → "Houston"
-`
+"Quais eventos?" → ""`
         },
         { role: 'user', content: query }
       ]
     });
-    const city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
+    let city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
+    // Defensive: blank/generic responses like "EUA" or "" mean try fallback
+    if (!city || city.toLowerCase() === 'eua' || city.length < 2) {
+      // Try a fallback: regex for major US cities in the message
+      const possible = query.match(/(?:em|in)\s+([A-Za-zÀ-ú\s]+)/i);
+      if (possible && possible[1]) return possible[1].trim();
+      // Or try a hard-coded minimal fallback for Miami, Austin, etc.
+      const known = ['miami', 'orlando', 'fort lauderdale', 'houston', 'worcester', 'austin', 'san francisco'];
+      const found = known.find(city => query.toLowerCase().includes(city));
+      if (found) return found.charAt(0).toUpperCase() + found.slice(1);
+      return '';
+    }
     return city;
   } catch (err) {
     console.error('[Groovoo] City extraction via OpenAI failed:', err);
+    // Fallback: Try regex
+    const possible = query.match(/(?:em|in)\s+([A-Za-zÀ-ú\s]+)/i);
+    if (possible && possible[1]) return possible[1].trim();
     return '';
   }
 }
@@ -53,11 +63,10 @@ function normalize(str) {
 
 /**
  * Fetches and filters events from Groovoo API.
- * Tries to extract the city from the user's query using OpenAI.
  * Returns up to 10 soonest events for that city (if found), or all events if not.
  */
 async function getEvents(message) {
-  let searchCity = await extractCityFromQuery(message);
+  const searchCity = await extractCityFromQuery(message);
   console.log('[Groovoo] Search city extracted:', searchCity);
 
   let events = [];
@@ -79,16 +88,6 @@ async function getEvents(message) {
     }))
   );
 
-  // Fallback: If city extraction failed, try naive scan for a known city in the message
-  if (!searchCity) {
-    const knownCities = [
-      ...new Set(events.map(e => e.address?.city).filter(Boolean).map(s => s.toLowerCase()))
-    ];
-    const msgLower = message.toLowerCase();
-    searchCity = knownCities.find(city => msgLower.includes(city));
-    if (searchCity) console.log('[Groovoo] Fallback matched city:', searchCity);
-  }
-
   let filtered = events;
   if (searchCity) {
     const normSearch = normalize(searchCity);
@@ -103,19 +102,9 @@ async function getEvents(message) {
     });
   }
 
-  // Always return at most 10, sorted by date
-  filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at)).slice(0, 10);
-
-  // Attach direct link to ticket purchase, or fallback to event/social URL
-  filtered = filtered.map(evt => {
-    const url = evt.external_shop_url || evt.url || evt.facebook_link || evt.instagram_link || '';
-    return {
-      ...evt,
-      buy_link: url
-    };
-  });
-
-  return { events: filtered, error: false };
+  // Sort by start date (soonest first)
+  filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+  return { events: filtered.slice(0, 10), error: false };
 }
 
 module.exports = { getEvents };
