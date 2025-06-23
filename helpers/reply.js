@@ -70,7 +70,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
   };
 }
 
-// Amazon: WhatsApp-safe, max 2 products, plain URLs, concise
+// Amazon: WhatsApp-safe, ONLY ONE product, always returns reply with link if possible
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -84,20 +84,30 @@ function amazon(items) {
       content: `Não achei produtos relevantes na Amazon, mas fiz uma busca extra pra te ajudar:\n\n${items[0].answer}`
     };
   }
+  // Only one product for maximum deliverability
+  const i = items[0];
+  const title = i.title || 'Produto';
+  const price = i.price || 'Preço não disponível';
+  const url = i.url || '';
   const dica = "\n\nDica: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";
-  const top = items.slice(0, 2).map(i => {
-    const title = i.title || 'Produto';
-    const price = i.price || 'Preço não disponível';
-    const url = i.url || '';
-    // WhatsApp: only plain URL
-    return url
-      ? `🛒 ${title}\n💰 ${price}\nComprar: ${url}`
-      : `🛒 ${title}\n💰 ${price}`;
-  }).join('\n\n');
-  return {
-    type: 'text',
-    content: `Produtos recomendados na Amazon:\n\n${top}${dica}`
-  };
+  let content;
+  if (url) {
+    content = [
+      `Produto recomendado na Amazon:`,
+      `🛒 ${title}`,
+      `💰 ${price}`,
+      `Comprar: ${url}`,
+      dica
+    ].filter(Boolean).join('\n');
+  } else {
+    content = [
+      `Produto recomendado na Amazon:`,
+      `🛒 ${title}`,
+      `💰 ${price}`,
+      dica
+    ].filter(Boolean).join('\n');
+  }
+  return { type: 'text', content };
 }
 
 function news(digest = '') {
