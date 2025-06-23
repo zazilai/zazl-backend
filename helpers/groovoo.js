@@ -6,45 +6,37 @@ const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
- * Uses OpenAI to extract the city from a user's query.
- * If fails, fallback to basic regex or keyword detection.
+ * Uses OpenAI to extract a valid US city from a user's query.
+ * Returns the city name or "" if none found.
  */
 async function extractCityFromQuery(query) {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1',
       temperature: 0,
-      max_tokens: 8,
+      max_tokens: 12,
       messages: [
         {
           role: 'system',
-          content: `Sua tarefa é extrair o nome da cidade ou localidade da pergunta do usuário. Se não houver cidade, responda só com "". Exemplos:
+          content: `Extraia APENAS o nome da cidade dos EUA, se houver, da pergunta do usuário, sem país ou estado. Não chute EUA. Se não houver cidade real, responda só com "".
+Exemplos:
+"Eventos brasileiros em Miami?" → "Miami"
 "Quais eventos em Boston?" → "Boston"
 "Eventos hoje em Fort Lauderdale?" → "Fort Lauderdale"
-"Tem festa brasileira em Miami?" → "Miami"
+"Tem festa brasileira em Houston?" → "Houston"
 "Quais eventos?" → ""`
         },
         { role: 'user', content: query }
       ]
     });
-    let city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
-    // Defensive: blank/generic responses like "EUA" or "" mean try fallback
-    if (!city || city.toLowerCase() === 'eua' || city.length < 2) {
-      // Try a fallback: regex for major US cities in the message
-      const possible = query.match(/(?:em|in)\s+([A-Za-zÀ-ú\s]+)/i);
-      if (possible && possible[1]) return possible[1].trim();
-      // Or try a hard-coded minimal fallback for Miami, Austin, etc.
-      const known = ['miami', 'orlando', 'fort lauderdale', 'houston', 'worcester', 'austin', 'san francisco'];
-      const found = known.find(city => query.toLowerCase().includes(city));
-      if (found) return found.charAt(0).toUpperCase() + found.slice(1);
-      return '';
-    }
+    const city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
+    // Only return if looks like a valid city (never EUA, empty, or country name)
+    if (!city || city.match(/eua|usa|estados unidos|united states|^$/i)) return '';
+    // Optionally, check for accidental "Estados Unidos" etc.
+    if (city.length > 20) return ''; // Defensive: ignore huge "city" names
     return city;
   } catch (err) {
     console.error('[Groovoo] City extraction via OpenAI failed:', err);
-    // Fallback: Try regex
-    const possible = query.match(/(?:em|in)\s+([A-Za-zÀ-ú\s]+)/i);
-    if (possible && possible[1]) return possible[1].trim();
     return '';
   }
 }
@@ -63,6 +55,7 @@ function normalize(str) {
 
 /**
  * Fetches and filters events from Groovoo API.
+ * Tries to extract the city from the user's query using OpenAI.
  * Returns up to 10 soonest events for that city (if found), or all events if not.
  */
 async function getEvents(message) {
@@ -94,11 +87,7 @@ async function getEvents(message) {
     filtered = events.filter(e => {
       const eventCity = normalize(e.address?.city);
       const localName = normalize(e.address?.local_name);
-      const found = eventCity.includes(normSearch) || localName.includes(normSearch);
-      if (found) {
-        console.log(`[Groovoo] MATCH: Query [${normSearch}] matched with event city [${eventCity}] or local_name [${localName}]`);
-      }
-      return found;
+      return eventCity.includes(normSearch) || localName.includes(normSearch);
     });
   }
 

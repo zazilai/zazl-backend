@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Ready, Perplexity-First, Never Silent)
+// index.cjs — Zazil (Marketplace-Ready, Perplexity-First, Never Silent, Full-Featured)
 
 require('dotenv').config();
 const express = require('express');
@@ -86,23 +86,28 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     }
 
     // 5. Personalization: Load memory (city, context)
-    let profileDoc, memorySummary = '', city = 'EUA';
+    let profileDoc, memorySummary = '', city = '';
     try {
       profileDoc = await db.collection('profiles').doc(waNumber).get();
       memorySummary = profileDoc.exists ? (profileDoc.data().memory || '') : '';
-      city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : 'EUA';
-    } catch (e) { city = 'EUA'; }
+      city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
+    } catch (e) { city = ''; }
 
     // 6. Intent detection (GPT-4.1)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
-    // 7. *** MAIN ANSWER: Perplexity FIRST ***
+    // 7. *** MAIN ANSWER: Perplexity FIRST (with date context if query is calendar-like) ***
     let mainAnswer = '';
     try {
       let prompt = incoming;
+      // For date/time/calendar queries, append today's date to the prompt
+      if (/data|hoje|amanhã|lua cheia|quando|calend[áa]rio|feriado|full moon|next|month|ano/i.test(incoming)) {
+        prompt += ` Hoje é ${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`;
+      }
+      // Add city context if it’s stored, and user’s message is location-relevant but missing it
       if (city && city !== 'EUA' && !incoming.toLowerCase().includes(city.toLowerCase())) {
-        prompt = `${incoming} em ${city}`;
+        prompt = `${prompt} em ${city}`;
       }
       const { answer } = await perplexityService.search(prompt);
       mainAnswer = answer || '';

@@ -1,4 +1,5 @@
 // helpers/amazon.js
+
 const axios = require('axios');
 const crypto = require('crypto');
 const { OpenAI } = require('openai');
@@ -13,7 +14,6 @@ const ENDPOINT = `https://${HOST}/paapi5/searchitems`;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// --- AWS SigV4 helpers ---
 function sign(key, msg) {
   return crypto.createHmac('sha256', key).update(msg).digest();
 }
@@ -25,7 +25,6 @@ function getSignatureKey(key, date, region, service) {
   return kSigning;
 }
 
-// --- Keyword extraction (always for US Amazon, never other stores!) ---
 async function extractKeywords(query) {
   try {
     const response = await openai.chat.completions.create({
@@ -35,7 +34,7 @@ async function extractKeywords(query) {
       messages: [
         {
           role: 'system',
-          content: 'Extraia apenas o termo ideal para buscar um produto físico na Amazon dos EUA a partir da pergunta do usuário. Apenas o termo, sem explicação ou menção a outros países ou lojas.'
+          content: 'Extraia apenas o termo de busca ideal para encontrar um produto físico na Amazon nos EUA a partir da pergunta do usuário. Apenas o termo, sem explicação ou detalhes de outros países ou lojas.'
         },
         { role: 'user', content: query }
       ]
@@ -47,7 +46,6 @@ async function extractKeywords(query) {
   }
 }
 
-// --- Core Amazon product search, always returns up to 3 best items ---
 async function searchAmazonProducts(query) {
   const keywords = await extractKeywords(query);
 
@@ -63,7 +61,6 @@ async function searchAmazonProducts(query) {
       'ItemInfo.Title',
       'Offers.Listings.Price',
       'Images.Primary.Large'
-      // No DetailPageURL in request; still comes in response
     ]
   };
   const payloadJson = JSON.stringify(payload);
@@ -118,12 +115,11 @@ async function searchAmazonProducts(query) {
     });
 
     const items = response.data?.SearchResult?.Items || [];
-    // Always map DetailPageURL, even if not in Resources — Amazon returns it
     return items.map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
       image: item.Images?.Primary?.Large?.URL,
-      url: item.DetailPageURL // Safe: always in response if present
+      url: item.DetailPageURL // Provided in API response (even if not requested)
     }));
   } catch (err) {
     // Log and fallback to Perplexity
