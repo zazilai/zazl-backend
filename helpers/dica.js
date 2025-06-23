@@ -32,9 +32,10 @@ async function getDica({ intent, message, city, memory = '' }) {
       /comprar|quanto custa|pre[çc]o|onde acho|onde encontro|amazon|produto|onde compro|compra/i.test(message)
     )
   ) {
+    console.log('[dica.js] AMAZON Dica triggered with message:', message);
     try {
       const items = await amazon.searchAmazonProducts(message);
-      // Always use replyHelper.amazon
+      console.log('[dica.js] Amazon items returned:', items);
       return replyHelper.amazon(items).content;
     } catch (err) {
       console.error('[dica.js] Amazon error:', err);

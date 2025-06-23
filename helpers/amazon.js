@@ -47,7 +47,9 @@ async function extractKeywords(query) {
 }
 
 async function searchAmazonProducts(query) {
+  console.log('[amazon.js] searchAmazonProducts called with:', query);
   const keywords = await extractKeywords(query);
+  console.log('[amazon.js] Keywords extracted:', keywords);
 
   const payload = {
     Keywords: keywords,
@@ -115,6 +117,7 @@ async function searchAmazonProducts(query) {
     });
 
     const items = response.data?.SearchResult?.Items || [];
+    console.log('[amazon.js] Amazon API items:', items);
     return items.map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
@@ -125,6 +128,7 @@ async function searchAmazonProducts(query) {
     // Log and fallback to Perplexity
     console.error('[Amazon API Great Product fetch failed]:', err.response?.data || err.message);
     const { answer } = await perplexityService.search(query);
+    console.log('[amazon.js] Fallback Perplexity answer:', answer);
     return [
       {
         title: 'Resultado alternativo',
