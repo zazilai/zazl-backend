@@ -7,27 +7,34 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Uses OpenAI to extract the city from a user's query.
- * Returns the city name or "" if none found.
+ * Returns the city name or "" if none found, or if the result is "EUA", "USA", etc.
  */
 async function extractCityFromQuery(query) {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1',
       temperature: 0,
-      max_tokens: 8,
+      max_tokens: 10,
       messages: [
         {
           role: 'system',
-          content: `Sua tarefa é extrair o nome da cidade ou localidade da pergunta do usuário. Se não houver cidade, responda só com "". Exemplos:
+          content: `Sua tarefa é extrair o nome da cidade ou localidade exata da pergunta do usuário. Nunca retorne termos genéricos como "EUA", "USA", "Estados Unidos", "Brasil" ou "America". Se não houver cidade clara, responda só com "". Exemplos:
 "Quais eventos em Boston?" → "Boston"
 "Eventos hoje em Fort Lauderdale?" → "Fort Lauderdale"
 "Tem festa brasileira em Miami?" → "Miami"
+"Temos eventos brasileiros em Fort Lauderdale?" → "Fort Lauderdale"
 "Quais eventos?" → ""`
         },
         { role: 'user', content: query }
       ]
     });
-    const city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
+    let city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
+    if (
+      !city ||
+      ["eua", "usa", "estados unidos", "united states", "america", "brasil", "brazil"].includes(city.toLowerCase())
+    ) {
+      city = "";
+    }
     return city;
   } catch (err) {
     console.error('[Groovoo] City extraction via OpenAI failed:', err);
