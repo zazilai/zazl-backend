@@ -2,39 +2,36 @@
 
 const axios = require('axios');
 const { OpenAI } = require('openai');
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Uses OpenAI to extract the city from a user's query.
- * Returns the city name or "" if none found, or if the result is "EUA", "USA", etc.
+ * Returns the city name or "" if none found.
  */
 async function extractCityFromQuery(query) {
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4.1',
+      model: 'gpt-4o',
       temperature: 0,
-      max_tokens: 10,
+      max_tokens: 8,
       messages: [
         {
           role: 'system',
-          content: `Sua tarefa é extrair o nome da cidade ou localidade exata da pergunta do usuário. Nunca retorne termos genéricos como "EUA", "USA", "Estados Unidos", "Brasil" ou "America". Se não houver cidade clara, responda só com "". Exemplos:
+          content: `
+Sua tarefa é extrair o nome da cidade ou localidade da pergunta do usuário, mesmo que o usuário mencione "eventos brasileiros em X" ou apenas "eventos em X". Responda apenas com o nome da cidade ou "" se não houver. Exemplos:
 "Quais eventos em Boston?" → "Boston"
 "Eventos hoje em Fort Lauderdale?" → "Fort Lauderdale"
 "Tem festa brasileira em Miami?" → "Miami"
-"Temos eventos brasileiros em Fort Lauderdale?" → "Fort Lauderdale"
-"Quais eventos?" → ""`
+"Quais eventos?" → ""
+"Temos eventos brasileiros em Miami?" → "Miami"
+"Temos eventos em Miami?" → "Miami"
+"Eventos brasileiros em Houston?" → "Houston"
+`
         },
         { role: 'user', content: query }
       ]
     });
-    let city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
-    if (
-      !city ||
-      ["eua", "usa", "estados unidos", "united states", "america", "brasil", "brazil"].includes(city.toLowerCase())
-    ) {
-      city = "";
-    }
+    const city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
     return city;
   } catch (err) {
     console.error('[Groovoo] City extraction via OpenAI failed:', err);
@@ -60,7 +57,7 @@ function normalize(str) {
  * Returns up to 10 soonest events for that city (if found), or all events if not.
  */
 async function getEvents(message) {
-  const searchCity = await extractCityFromQuery(message);
+  let searchCity = await extractCityFromQuery(message);
   console.log('[Groovoo] Search city extracted:', searchCity);
 
   let events = [];
@@ -82,6 +79,16 @@ async function getEvents(message) {
     }))
   );
 
+  // Fallback: If city extraction failed, try naive scan for a known city in the message
+  if (!searchCity) {
+    const knownCities = [
+      ...new Set(events.map(e => e.address?.city).filter(Boolean).map(s => s.toLowerCase()))
+    ];
+    const msgLower = message.toLowerCase();
+    searchCity = knownCities.find(city => msgLower.includes(city));
+    if (searchCity) console.log('[Groovoo] Fallback matched city:', searchCity);
+  }
+
   let filtered = events;
   if (searchCity) {
     const normSearch = normalize(searchCity);
@@ -96,9 +103,19 @@ async function getEvents(message) {
     });
   }
 
-  // Sort by start date (soonest first)
-  filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-  return { events: filtered.slice(0, 10), error: false };
+  // Always return at most 10, sorted by date
+  filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at)).slice(0, 10);
+
+  // Attach direct link to ticket purchase, or fallback to event/social URL
+  filtered = filtered.map(evt => {
+    const url = evt.external_shop_url || evt.url || evt.facebook_link || evt.instagram_link || '';
+    return {
+      ...evt,
+      buy_link: url
+    };
+  });
+
+  return { events: filtered, error: false };
 }
 
 module.exports = { getEvents };
