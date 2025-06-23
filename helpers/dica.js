@@ -34,18 +34,27 @@ async function getDica({ intent, message, city }) {
       const { events } = await groovoo.getEvents(searchMsg);
       if (events && events.length) {
         const e = events[0];
-        // Try all possible event URL fields (external_shop_url is often Groovoo's sales link)
-        let eventUrl = e.external_shop_url || e.url || e.facebook_link || e.instagram_link || '';
-        let cityText = (e.address && e.address.city) ? e.address.city : (searchCity || '');
-        // Remove empty parens if city or URL missing
-        let dica = `Evento parceiro Groovoo: *${e.name}*`;
-        if (cityText) dica += ` em ${cityText}`;
-        if (eventUrl) dica += `, [ver ingressos aqui](${eventUrl})`;
-        dica += '.';
-        return dica;
+        // Format date/time for Brazil
+        const dateObj = new Date(e.start_at);
+        const date = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+        const time = dateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        const venue = [e.address?.local_name, e.address?.address].filter(Boolean).join(', ');
+        const cityText = e.address?.city || searchCity || '';
+        const url = e.external_shop_url || e.url || e.facebook_link || e.instagram_link || '';
+        const voucher = e.voucher ? `\n🎟️ Cupom: ${e.voucher}` : '';
+
+        // Friendly, "Zazil" message style:
+        return [
+          `Encontrei uns bem legais aqui ó:`,
+          `*${e.name}*${cityText ? ` em ${cityText}` : ''}`,
+          `🗓️ ${date} às ${time}`,
+          venue ? `📍 ${venue}` : '',
+          url ? `🔗 [Compre ingresso aqui](${url})` : '',
+          voucher
+        ].filter(Boolean).join('\n');
       }
       // If no events for city
-      return 'Ainda não temos eventos parceiros Groovoo nesta cidade, mas fique de olho nas novidades!';
+      return 'Ainda não achei eventos parceiros aqui, mas sempre aparecem novidades. Se quiser, me peça de novo mais tarde!';
     } catch (err) {
       console.error('[dica.js] Error fetching Groovoo events:', err);
       return '';

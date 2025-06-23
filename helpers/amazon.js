@@ -59,8 +59,8 @@ async function searchAmazonProducts(query) {
     Resources: [
       'ItemInfo.Title',
       'Offers.Listings.Price',
-      'Images.Primary.Large',
-      'DetailPageURL'           // <------ This fixes your error!
+      'Images.Primary.Large'
+      // Removed 'DetailPageURL'
     ]
   };
   const payloadJson = JSON.stringify(payload);
@@ -118,11 +118,11 @@ async function searchAmazonProducts(query) {
 
     const items = response.data?.SearchResult?.Items || [];
     return items.map(item => ({
-      title: item.ItemInfo?.Title?.DisplayValue || '',
-      price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount || '',
-      image: item.Images?.Primary?.Large?.URL || '',
-      url: item.DetailPageURL || ''
-    })).filter(i => i.title && i.url); // Only return real results
+      title: item.ItemInfo?.Title?.DisplayValue,
+      price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
+      image: item.Images?.Primary?.Large?.URL,
+      url: item.DetailPageURL // <- this still comes in the response!
+    }));
   } catch (err) {
     // Log and fallback to Perplexity
     console.error('[Amazon API Great Product fetch failed]:', err.response?.data || err.message);
