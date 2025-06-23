@@ -16,7 +16,6 @@ Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
   };
 }
 
-// Improved events function with clean Perplexity fallback!
 function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
@@ -45,7 +44,6 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
     };
   }
 
-  // If Perplexity fallback is present, just return it directly (no "eventos dos parceiros" text)
   if (fallbackText && fallbackText.trim().length > 10) {
     return {
       type: 'text',
@@ -53,7 +51,6 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
     };
   }
 
-  // Nothing found at all
   return {
     type: 'text',
     content: [
@@ -119,7 +116,6 @@ Se precisar de ajuda, é só responder por aqui ou enviar um email para zazil@wo
   };
 }
 
-// Great Product Amazon logic: GPT keyword, Perplexity fallback, cool Zazil touch
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -127,7 +123,6 @@ function amazon(items) {
       content: '🔎 Não encontrei produtos relevantes na Amazon agora. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
-  // Perplexity fallback: if .answer is present, it's a non-Amazon answer
   if (items[0].answer) {
     return {
       type: 'text',
@@ -161,6 +156,22 @@ function fallbackOutage() {
   };
 }
 
+// NOVO: Trial Expirado
+function trialExpired(waNumber) {
+  const clean = waNumber.replace(/^whatsapp:/, '');
+  return {
+    type: 'text',
+    content: `Seu período de teste gratuito de 7 dias acabou! 😢
+
+Para continuar usando o Zazil, escolha um plano a partir de apenas $5 por mês:
+
+🟢 Lite (15 msgs/dia): https://zazl-backend.onrender.com/checkout/lite/month?wa=${clean}
+🔵 Pro (ilimitado): https://zazl-backend.onrender.com/checkout/pro/month?wa=${clean}
+
+Dúvidas? É só responder aqui ou mandar email para zazil@worldofbrazil.ai`
+  };
+}
+
 module.exports = {
   generic,
   dolar,
@@ -172,4 +183,5 @@ module.exports = {
   amazon,
   fallback,
   fallbackOutage,
+  trialExpired
 };

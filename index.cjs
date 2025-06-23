@@ -51,12 +51,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
-    // 2. Plan limit check
+    // 2. Plan limit check (including trial expiration)
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
-      const upgradeMsg = replyHelper.upgrade(waNumber);
-      res.type('text/xml');
-      return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
+      if (quota.reason === 'trial_expired') {
+        const expiredMsg = replyHelper.trialExpired(waNumber);
+        res.type('text/xml');
+        return res.send(`<Response><Message>${expiredMsg.content}</Message></Response>`);
+      } else {
+        const upgradeMsg = replyHelper.upgrade(waNumber);
+        res.type('text/xml');
+        return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
+      }
     }
 
     // 3. Robust CANCEL detection (before intent)
