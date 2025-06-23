@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Ready, Perplexity-First, Never Silent, Full-Featured)
+// index.cjs — Zazil (Marketplace-Ready, Perplexity-First, WhatsApp-safe, City-intelligent)
 
 require('dotenv').config();
 const express = require('express');
@@ -10,7 +10,7 @@ const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const profileSvc = require('./helpers/profile');
-const dicaSvc = require('./helpers/dica');        // Marketplace engine, ADDITIVE
+const dicaSvc = require('./helpers/dica');
 const perplexityService = require('./helpers/perplexity');
 const postprocess = require('./helpers/postprocess');
 const memorySvc = require('./helpers/memory');
@@ -27,6 +27,22 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
 const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
+
+// WhatsApp truncation helper — safe limit for messages (950 is conservative)
+function truncateForWhatsapp(msg, maxLen = 950) {
+  if (!msg) return '';
+  if (msg.length <= maxLen) return msg;
+  // Try to keep main answer + first Dica (if present)
+  const dicaSplit = msg.toLowerCase().indexOf('dica do zazil');
+  if (dicaSplit > 0) {
+    const mainShort = msg.slice(0, dicaSplit).split('.').slice(0, 2).join('.') + '.\n';
+    const dica = msg.slice(dicaSplit, dicaSplit + 300); // Only first Dica, max 300 chars
+    let output = mainShort + dica;
+    if (output.length > maxLen) output = output.slice(0, maxLen - 20) + '\n...(resposta resumida)';
+    return output;
+  }
+  return msg.slice(0, maxLen - 20) + '\n...(resposta resumida)';
+}
 
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -97,19 +113,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
-    // 7. *** MAIN ANSWER: Perplexity FIRST (with date context if query is calendar-like) ***
+    // 7. MAIN ANSWER: Perplexity (always with city, fallback to EUA)
+    let cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : 'EUA';
     let mainAnswer = '';
     try {
-      let prompt = incoming;
-      // For date/time/calendar queries, append today's date to the prompt
-      if (/data|hoje|amanhã|lua cheia|quando|calend[áa]rio|feriado|full moon|next|month|ano/i.test(incoming)) {
-        prompt += ` Hoje é ${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`;
-      }
-      // Add city context if it’s stored, and user’s message is location-relevant but missing it
-      if (city && city !== 'EUA' && !incoming.toLowerCase().includes(city.toLowerCase())) {
-        prompt = `${prompt} em ${city}`;
-      }
-      const { answer } = await perplexityService.search(prompt);
+      const { answer } = await perplexityService.search(incoming, cityForPrompt);
       mainAnswer = answer || '';
       if (!mainAnswer || mainAnswer.length < 3) {
         // Fallback: OpenAI/GPT-4.1 if Perplexity gives nothing
@@ -138,7 +146,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
     }
 
-    // 8. *** "Dica do Zazil" — ADDITIVE Marketplace/Partner Layer ***
+    // 8. "Dica do Zazil" — ADDITIVE Marketplace/Partner Layer
     let dicaSection = '';
     try {
       dicaSection = await dicaSvc.getDica({ intent, message: incoming, city, memory: memorySummary });
@@ -146,15 +154,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       dicaSection = ''; // Never block main answer
     }
 
-    // 9. Compose the reply: Main Answer FIRST, Dica if available
+    // 9. Compose and truncate for WhatsApp safety
     const finalContent = [
       mainAnswer.trim(),
-      dicaSection ? `\n\n💡 *Dica do Zazil*: ${dicaSection}` : ''
+      dicaSection ? `\n\n💡 Dica do Zazil: ${dicaSection}` : ''
     ].join('').trim();
 
     let replyObj = replyHelper.generic(finalContent);
 
-    // 10. Postprocess (cleans up, applies US-bias, etc)
+    // 10. Postprocess (cleans up, trust dica, etc)
     replyObj = postprocess(replyObj, incoming, intent);
 
     // 11. Memory update (same as before)
@@ -175,16 +183,16 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       } catch (e) { console.error('[MEMORY] Outer error:', e); }
     }
 
-    // 12. Fallback for empty replyObj
+    // 12. Fallback for empty replyObj; truncate long replies for WhatsApp!
     let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
-      safeContent = replyObj.content;
+      safeContent = truncateForWhatsapp(replyObj.content, 950);
     } else {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
-    
+
     console.log('[index.cjs] Outgoing reply:', safeContent, '\nLength:', safeContent.length);
-    
+
     res.type('text/xml');
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {

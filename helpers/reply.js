@@ -7,16 +7,11 @@ function generic(content) {
 function dolar(rate) {
   return {
     type: 'text',
-    content: `💵 Cotação do Dólar Hoje:
-
-US$ 1 = R$ ${rate.buy}
-
-Se estiver pensando em enviar dinheiro para o Brasil, use a Remitly:
-https://remit.ly/1bh2ujzp`
+    content: `💵 Cotação do Dólar Hoje:\n\nUS$ 1 = R$ ${rate.buy}\n\nSe estiver pensando em enviar dinheiro para o Brasil, use a Remitly:\nhttps://remit.ly/1bh2ujzp`
   };
 }
 
-// Events: Production fix — MAX 3 events, minimal markdown, safe for WhatsApp
+// Events: WhatsApp-safe, max 3 events, minimal markdown
 function events(list = [], city = '', fallbackText = '', userQuery = '') {
   const dicas = [
     'Chegue cedo pra garantir o melhor lugar!',
@@ -29,7 +24,6 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
 
   if (Array.isArray(list) && list.length > 0) {
     const header = `🎉 Eventos Brasileiros${city ? ` em ${city}` : ''}:\n`;
-    // Max 3 events for WhatsApp safety
     const lines = list.slice(0, 3).map(evt => {
       const name = evt.name || 'Evento';
       const location = (evt.address && evt.address.local_name) || evt.location || '';
@@ -41,7 +35,6 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
         evt.facebook_link ||
         evt.instagram_link ||
         '';
-      // Date formatting: "2025-12-31T21:00:00.000Z" → 31/12/2025 às 21:00
       let formattedDate = '';
       if (dateIso) {
         try {
@@ -49,7 +42,6 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
           formattedDate = `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
         } catch {}
       }
-      // Minimal markdown: no asterisks, links are plain
       return [
         `🗓️ ${name}`,
         location ? `📍 ${location}` : '',
@@ -66,16 +58,9 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
       ].filter(Boolean).join('\n')
     };
   }
-
-  // If fallback from Perplexity or similar is present
   if (fallbackText && fallbackText.trim().length > 10) {
-    return {
-      type: 'text',
-      content: fallbackText.trim()
-    };
+    return { type: 'text', content: fallbackText.trim() };
   }
-
-  // If nothing found at all
   return {
     type: 'text',
     content: [
@@ -85,7 +70,7 @@ function events(list = [], city = '', fallbackText = '', userQuery = '') {
   };
 }
 
-// Amazon: safe for WhatsApp, MAX 2 products, minimal markdown
+// Amazon: WhatsApp-safe, max 2 products, minimal markdown
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -99,13 +84,11 @@ function amazon(items) {
       content: `Não achei produtos relevantes na Amazon, mas fiz uma busca extra pra te ajudar:\n\n${items[0].answer}`
     };
   }
-  // Limit to 2 products for WhatsApp safety
   const dica = "\n\nDica: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";
   const top = items.slice(0, 2).map(i => {
     const title = i.title || 'Produto';
     const price = i.price || 'Preço não disponível';
     const url = i.url || '';
-    // No asterisks, no link markdown — only plain text
     return url
       ? `🛒 ${title}\n💰 ${price}\nComprar: ${url}`
       : `🛒 ${title}\n💰 ${price}`;
@@ -123,10 +106,7 @@ function news(digest = '') {
       content: '🗞️ Nenhuma notícia recente encontrada no momento. Tente novamente em breve.'
     };
   }
-  return {
-    type: 'text',
-    content: `🗞️ Resumo de Notícias:\n\n${digest}`
-  };
+  return { type: 'text', content: `🗞️ Resumo de Notícias:\n\n${digest}` };
 }
 
 function welcome(waNumber) {
