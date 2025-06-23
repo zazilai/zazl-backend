@@ -2,14 +2,13 @@
 
 const axios = require('axios');
 const { OpenAI } = require('openai');
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
- * Uses OpenAI to extract a valid US city from a user's query.
- * Returns the city name or "" if none found.
+ * If a city is provided, skip OpenAI extraction.
  */
-async function extractCityFromQuery(query) {
+async function extractCityFromQuery(queryOrCity, skipExtract = false) {
+  if (skipExtract) return queryOrCity;
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1',
@@ -26,14 +25,12 @@ Exemplos:
 "Tem festa brasileira em Houston?" → "Houston"
 "Quais eventos?" → ""`
         },
-        { role: 'user', content: query }
+        { role: 'user', content: queryOrCity }
       ]
     });
     const city = response.choices?.[0]?.message?.content?.replace(/"/g, '').trim();
-    // Only return if looks like a valid city (never EUA, empty, or country name)
     if (!city || city.match(/eua|usa|estados unidos|united states|^$/i)) return '';
-    // Optionally, check for accidental "Estados Unidos" etc.
-    if (city.length > 20) return ''; // Defensive: ignore huge "city" names
+    if (city.length > 20) return '';
     return city;
   } catch (err) {
     console.error('[Groovoo] City extraction via OpenAI failed:', err);
@@ -41,9 +38,6 @@ Exemplos:
   }
 }
 
-/**
- * Normalizes a string for loose city matching.
- */
 function normalize(str) {
   return (str || '')
     .toLowerCase()
@@ -53,14 +47,22 @@ function normalize(str) {
     .trim();
 }
 
-/**
- * Fetches and filters events from Groovoo API.
- * Tries to extract the city from the user's query using OpenAI.
- * Returns up to 10 soonest events for that city (if found), or all events if not.
- */
-async function getEvents(message) {
-  const searchCity = await extractCityFromQuery(message);
-  console.log('[Groovoo] Search city extracted:', searchCity);
+async function getEvents(queryOrCity) {
+  let city = '';
+  let skipExtract = false;
+  if (
+    typeof queryOrCity === 'string' &&
+    queryOrCity.length > 1 &&
+    !/\s/.test(queryOrCity) &&
+    queryOrCity.match(/^[a-zA-Z\s]+$/)
+  ) {
+    // Looks like a city name
+    city = queryOrCity;
+    skipExtract = true;
+  } else {
+    city = await extractCityFromQuery(queryOrCity, false);
+  }
+  console.log('[Groovoo] Search city extracted:', city);
 
   let events = [];
   try {
@@ -72,18 +74,20 @@ async function getEvents(message) {
     return { events: [], error: true };
   }
 
-  // DEBUG: List first 10 event cities for reference
-  console.log(
-    '[Groovoo] First 10 event cities:',
-    events.slice(0, 10).map(e => ({
-      city: e.address?.city,
-      local_name: e.address?.local_name
-    }))
-  );
+  if (events.length) {
+    // Debug: Log the first few events' cities
+    console.log(
+      '[Groovoo] First 10 event cities:',
+      events.slice(0, 10).map(e => ({
+        city: e.address?.city,
+        local_name: e.address?.local_name
+      }))
+    );
+  }
 
   let filtered = events;
-  if (searchCity) {
-    const normSearch = normalize(searchCity);
+  if (city) {
+    const normSearch = normalize(city);
     filtered = events.filter(e => {
       const eventCity = normalize(e.address?.city);
       const localName = normalize(e.address?.local_name);
@@ -91,7 +95,6 @@ async function getEvents(message) {
     });
   }
 
-  // Sort by start date (soonest first)
   filtered = filtered.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
   return { events: filtered.slice(0, 10), error: false };
 }

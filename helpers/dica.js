@@ -2,53 +2,81 @@
 
 const amazon = require('./amazon');
 const groovoo = require('./groovoo');
+const replyHelper = require('./reply');
+const extractCityFromText = require('./utils/extractCityFromText');
 
 /**
  * Returns a “Dica do Zazil” string for Marketplace/Partners.
- * - Always additive, never replaces the main Perplexity/GPT answer.
- * - Safe: if partner fails, just returns '' and main answer is shown.
+ * Always additive, never replaces main Perplexity/GPT answer.
  */
-async function getDica({ intent, message, city }) {
-  // AMAZON/Product
-  if (intent === 'AMAZON') {
-    try {
-      const items = await amazon.searchAmazonProducts(message);
-      if (items && items.length && items[0].url && items[0].title) {
-        return `Encontrei um produto recomendado na Amazon: [${items[0].title}](${items[0].url}) — sempre confira as avaliações antes de comprar!`;
-      }
-    } catch (err) {
-      console.error('[dica.js] Amazon error:', err);
-    }
-    return '';
+async function getDica({ intent, message, city, memory = '' }) {
+  // Smart city extraction/fallback
+  let searchCity = '';
+  try {
+    searchCity = await extractCityFromText(message);
+  } catch (e) {
+    console.error('[dica.js] Error extracting city:', e);
+    searchCity = '';
+  }
+  if (!searchCity && city) searchCity = city;
+  if (!searchCity && memory) {
+    const match = memory.match(/moro em ([\w\s]+)/i);
+    if (match) searchCity = match[1].trim();
   }
 
-  // Currency/FX
+  // 1. AMAZON (products) — always formatter, always US
+  if (
+    intent === 'AMAZON' ||
+    (
+      intent === 'GENERIC' &&
+      /comprar|quanto custa|pre[çc]o|onde acho|onde encontro|amazon|produto|onde compro|compra/i.test(message)
+    )
+  ) {
+    try {
+      const items = await amazon.searchAmazonProducts(message);
+      // Always use replyHelper.amazon
+      return replyHelper.amazon(items).content;
+    } catch (err) {
+      console.error('[dica.js] Amazon error:', err);
+      return '💡 Amazon.com é sempre a melhor aposta para produtos nos EUA. Busque pelo nome do item e confira avaliações!';
+    }
+  }
+
+  // 2. FX (Remitly)
   if (intent === 'FX') {
     return 'Precisa enviar dinheiro pro Brasil? Use a Remitly para transferências rápidas e seguras: https://remit.ly/1bh2ujzp';
   }
 
-  // Events — Groovoo integration
-  if (intent === 'EVENT') {
+  // 3. EVENTS (Groovoo) — always formatter, top 3 events
+  if (
+    intent === 'EVENT' ||
+    (
+      intent === 'GENERIC' &&
+      /evento|show|festa|balada|programa(ção)?|agenda|o que fazer|acontece|tem pra fazer/i.test(message)
+    )
+  ) {
     try {
-      const { events } = await groovoo.getEvents(message);
-      if (events && events.length) {
-        const e = events[0];
-        // Choose the best available event link
-        const eventUrl = e.buy_link || e.external_shop_url || e.url || e.facebook_link || e.instagram_link || '';
-        const cityText = (e.address && e.address.city) ? e.address.city : (city || '');
-        let dica = `Encontrei um evento bem legal: *${e.name}*`;
-        if (cityText) dica += ` em ${cityText}`;
-        if (eventUrl) dica += `, [ver ingressos aqui](${eventUrl})`;
-        dica += '.';
-        return dica;
+      // Try city extracted, fallback to profile, fallback to all
+      let result = await groovoo.getEvents(searchCity || '');
+      let { events } = result;
+      if (!events?.length && searchCity) {
+        // Fallback: try US-wide
+        result = await groovoo.getEvents('USA');
+        events = result.events;
       }
+      if (events?.length) {
+        // Use only top 3 and formatter
+        return replyHelper.events(events.slice(0, 3), searchCity).content;
+      }
+      // Fallback: no events
+      return replyHelper.events([], searchCity).content;
     } catch (err) {
-      console.error('[dica.js] Error fetching Groovoo events:', err);
+      console.error('[dica.js] Groovoo error:', err);
+      return 'Não consegui consultar eventos no momento. Tente novamente mais tarde!';
     }
-    return '';
   }
 
-  // Add more marketplace/partner integrations here as you grow!
+  // TODO: More marketplace/partner integrations
 
   // Default: no dica for this intent
   return '';

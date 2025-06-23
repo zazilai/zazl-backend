@@ -141,7 +141,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     // 8. *** "Dica do Zazil" — ADDITIVE Marketplace/Partner Layer ***
     let dicaSection = '';
     try {
-      dicaSection = await dicaSvc.getDica({ intent, message: incoming, city });
+      dicaSection = await dicaSvc.getDica({ intent, message: incoming, city, memory: memorySummary });
     } catch (e) {
       dicaSection = ''; // Never block main answer
     }
