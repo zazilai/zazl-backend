@@ -1,4 +1,5 @@
 // helpers/amazon.js
+
 const axios = require('axios');
 const crypto = require('crypto');
 const { OpenAI } = require('openai');
@@ -24,6 +25,7 @@ function getSignatureKey(key, date, region, service) {
   return kSigning;
 }
 
+// Extracts search term for Amazon US (GPT guidance, no keyword hack)
 async function extractKeywords(query) {
   try {
     const response = await openai.chat.completions.create({
@@ -33,7 +35,11 @@ async function extractKeywords(query) {
       messages: [
         {
           role: 'system',
-          content: 'Extraia o termo de busca mais eficiente para encontrar um produto físico na Amazon a partir da pergunta do usuário. Apenas o termo, sem explicação.'
+          content: `Extraia apenas o termo de busca ideal para procurar esse produto físico na Amazon dos EUA. 
+Exemplo:
+"Onde compro raquete de tênis?" → "tennis racket"
+"Onde comprar panela de pressão?" → "pressure cooker"
+Retorne apenas o termo em inglês (se possível), sem explicações, nem aspas.`
         },
         { role: 'user', content: query }
       ]
@@ -60,7 +66,7 @@ async function searchAmazonProducts(query) {
       'ItemInfo.Title',
       'Offers.Listings.Price',
       'Images.Primary.Large'
-      // Removed 'DetailPageURL'
+      // Do NOT include 'DetailPageURL' here
     ]
   };
   const payloadJson = JSON.stringify(payload);
@@ -117,16 +123,20 @@ async function searchAmazonProducts(query) {
     });
 
     const items = response.data?.SearchResult?.Items || [];
+    // Always access DetailPageURL from response (do not put it in Resources!)
     return items.map(item => ({
       title: item.ItemInfo?.Title?.DisplayValue,
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
       image: item.Images?.Primary?.Large?.URL,
-      url: item.DetailPageURL // <- this still comes in the response!
+      url: item.DetailPageURL
     }));
   } catch (err) {
     // Log and fallback to Perplexity
     console.error('[Amazon API Great Product fetch failed]:', err.response?.data || err.message);
-    const { answer } = await perplexityService.search(query);
+    // Give GPT one more shot at a US-specific, clear answer (Perplexity fallback)
+    const { answer } = await perplexityService.search(
+      `${query}\n\nSó mostre lojas e links dos EUA, especialmente Amazon.com. Não cite sites brasileiros.`
+    );
     return [
       {
         title: 'Resultado alternativo',
