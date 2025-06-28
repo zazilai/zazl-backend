@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Ready, WhatsApp-safe, City-intelligent, State-of-the-art)
+// index.cjs — Zazil (Production-Ready, WhatsApp-safe, Smart, Great Product)
 
 require('dotenv').config();
 const express = require('express');
@@ -26,17 +26,13 @@ const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
-const TRUNC_LINK = 'https://zazl-backend.onrender.com/view/';
-
-// WhatsApp truncation helper — safe limit for messages (950 is conservative)
 function truncateForWhatsapp(msg, maxLen = 950) {
   if (!msg) return '';
   if (msg.length <= maxLen) return msg;
-  // Try to keep main answer + first Dica (if present)
   const dicaSplit = msg.toLowerCase().indexOf('dica do zazil');
   if (dicaSplit > 0) {
     const mainShort = msg.slice(0, dicaSplit).split('.').slice(0, 2).join('.') + '.\n';
-    const dica = msg.slice(dicaSplit, dicaSplit + 300); // Only first Dica, max 300 chars
+    const dica = msg.slice(dicaSplit, dicaSplit + 300);
     let output = mainShort + dica;
     if (output.length > maxLen) output = output.slice(0, maxLen - 20) + '\n...(resposta resumida)';
     return output;
@@ -47,11 +43,9 @@ function truncateForWhatsapp(msg, maxLen = 950) {
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
-
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
@@ -60,7 +54,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   console.log('[twilio] got incoming:', JSON.stringify(incoming));
 
   try {
-    // 1. Onboarding for new users
     const { wasNew } = await profileSvc.load(db, waNumber);
     if (wasNew) {
       const welcomeMsg = replyHelper.welcome(waNumber);
@@ -68,7 +61,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
-    // 2. Plan limit check
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const upgradeMsg = replyHelper.upgrade(waNumber);
@@ -76,7 +68,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // 3. Robust CANCEL detection (before intent)
+    // CANCEL
     const incomingLower = incoming.toLowerCase();
     if (
       /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(incomingLower) ||
@@ -92,7 +84,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // 4. Greeting detection
+    // GREETING
     const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
     if (greetingRegex.test(incoming)) {
       const greetReply =
@@ -101,7 +93,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // 5. Personalization: Load memory (city, context)
+    // Personalization: Load memory (city, context)
     let profileDoc, memorySummary = '', city = '';
     try {
       profileDoc = await db.collection('profiles').doc(waNumber).get();
@@ -109,17 +101,17 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
     } catch (e) { city = ''; }
 
-    // 6. Intent detection (GPT-4.1)
+    // Intent detection
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
-    // 7. MAIN ANSWER: Smart intent routing
+    // MAIN ANSWER LOGIC
     let mainAnswer = '';
     let usedModel = '';
     const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : 'EUA';
 
     try {
-      // Only Perplexity for NEWS, or GENERIC with "current event" keywords
+      // NEWS or GENERIC with "current event" keywords → Perplexity
       if (
         intent === 'NEWS' ||
         (
@@ -144,10 +136,8 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           usedModel = 'GPT-4.1 (fallback)';
         }
       } else if (intent === 'AMAZON' || intent === 'EVENT') {
-        // Marketplace layer will build the answer, so skip mainAnswer
         mainAnswer = '';
         usedModel = 'MARKETPLACE';
-        // DEBUG LOG for Amazon marketplace calls:
         if (intent === 'AMAZON') {
           console.log('[Zazil/AMAZON] Routing to DicaSvc/Amazon logic. If you see no reply, check replyHelper.amazon() and DicaSvc!');
         }
@@ -167,7 +157,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       }
       console.log(`[AI] Answer generated by: ${usedModel}`);
     } catch (err) {
-      // Double fallback to OpenAI if everything fails
       console.error('[AI ERROR]', err);
       const gpt = await openai.chat.completions.create({
         model: 'gpt-4.1',
@@ -182,15 +171,15 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       usedModel = 'GPT-4.1 (double fallback)';
     }
 
-    // 8. "Dica do Zazil" — ADDITIVE Marketplace/Partner Layer
+    // "Dica do Zazil" — Marketplace/Partner Layer
     let dicaSection = '';
     try {
       dicaSection = await dicaSvc.getDica({ intent, message: incoming, city, memory: memorySummary });
     } catch (e) {
-      dicaSection = ''; // Never block main answer
+      dicaSection = '';
     }
 
-    // 9. Compose and truncate for WhatsApp safety
+    // Compose and truncate for WhatsApp
     const finalContent = [
       mainAnswer && mainAnswer.trim(),
       dicaSection ? `\n\n💡 Dica do Zazil: ${dicaSection}` : ''
@@ -198,10 +187,10 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     let replyObj = replyHelper.generic(finalContent);
 
-    // 10. Postprocess (cleans up, trust dica, etc)
+    // Postprocess
     replyObj = postprocess(replyObj, incoming, intent);
 
-    // 11. Memory update (same as before)
+    // Memory update
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
     if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
@@ -219,7 +208,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       } catch (e) { console.error('[MEMORY] Outer error:', e); }
     }
 
-    // 12. Fallback for empty replyObj; truncate long replies for WhatsApp!
+    // Fallback for empty replyObj; truncate long replies
     let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = truncateForWhatsapp(replyObj.content, 950);
@@ -227,14 +216,21 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
 
-    // DEBUG: Log intent and message length for all answers, especially Amazon
+    // Final check: too short, broken, fallback
+    if (
+      safeContent.length < 80 ||
+      /^1\.\s*$/.test(safeContent.trim()) ||
+      safeContent.startsWith('Dica do Zazil')
+    ) {
+      safeContent = replyHelper.fallback().content;
+    }
+
     console.log(`[index.cjs] Intent: ${intent} | Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
 
     res.type('text/xml');
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
-    // OUTAGE FALLBACK for Firestore/Firebase/network error
     if (
       (err.message && err.message.match(/firestore|firebase|unavailable|timeout|network/i)) ||
       (err.code && err.code.toString().includes('unavailable'))
