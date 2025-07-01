@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Production-Ready, WhatsApp-safe, Smart, Great Product)
+// index.cjs — Zazil (Marketplace-Orchestrated, WhatsApp-safe, Smart, Great Product)
 
 require('dotenv').config();
 const express = require('express');
@@ -10,7 +10,7 @@ const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const profileSvc = require('./helpers/profile');
-const dicaSvc = require('./helpers/dica');
+const getMarketplaceDica = require('./helpers/marketplaceDica'); // NEW
 const perplexityService = require('./helpers/perplexity');
 const postprocess = require('./helpers/postprocess');
 const memorySvc = require('./helpers/memory');
@@ -135,12 +135,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
           usedModel = 'GPT-4.1 (fallback)';
         }
-      } else if (intent === 'AMAZON' || intent === 'EVENT') {
-        mainAnswer = '';
-        usedModel = 'MARKETPLACE';
-        if (intent === 'AMAZON') {
-          console.log('[Zazil/AMAZON] Routing to DicaSvc/Amazon logic. If you see no reply, check replyHelper.amazon() and DicaSvc!');
-        }
       } else {
         // All other intents: GPT-4.1, always city-aware
         const gpt = await openai.chat.completions.create({
@@ -171,23 +165,26 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       usedModel = 'GPT-4.1 (double fallback)';
     }
 
-    // "Dica do Zazil" — Marketplace/Partner Layer
-    let dicaSection = '';
+    // NEW: Marketplace Dica Orchestration!
+    let marketplaceDica = '';
     try {
-      dicaSection = await dicaSvc.getDica({ intent, message: incoming, city, memory: memorySummary });
+      marketplaceDica = await getMarketplaceDica({ message: incoming, city, context: memorySummary });
     } catch (e) {
-      dicaSection = '';
+      console.error('[Marketplace Dica] Error:', e);
+      marketplaceDica = '';
     }
 
     // Compose and truncate for WhatsApp
-    const finalContent = [
-      mainAnswer && mainAnswer.trim(),
-      dicaSection ? `\n\n💡 Dica do Zazil: ${dicaSection}` : ''
-    ].filter(Boolean).join('').trim();
+    let finalContent = mainAnswer && mainAnswer.trim();
+    if (marketplaceDica) {
+      finalContent += `\n\n${marketplaceDica}`;
+    } else if (['GENERIC', 'NEWS'].includes(intent)) {
+      // Fallback to generic trust dica if no marketplace dica
+      finalContent += '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
+    }
+    finalContent = finalContent.trim();
 
     let replyObj = replyHelper.generic(finalContent);
-
-    // Postprocess
     replyObj = postprocess(replyObj, incoming, intent);
 
     // Memory update
