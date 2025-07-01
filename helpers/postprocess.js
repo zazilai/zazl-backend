@@ -1,12 +1,5 @@
 // helpers/postprocess.js
 
-/**
- * "Zazil-izes" only generic/news answers for personality and trust,
- * never changes FX, events, amazon, or cancel replies.
- * Removes all [N] reference markers everywhere for cleanliness.
- * Guarantees never sending empty, broken, or “1.” answers.
- */
-
 function cleanCitations(text) {
   if (!text) return '';
   return text.replace(/\s*\[\d+\]/g, '').replace(/\s+$/, '');
@@ -18,9 +11,9 @@ module.exports = function postprocess(replyObj, question = '', intent = '') {
   }
   replyObj.content = cleanCitations(replyObj.content);
 
-  // ----- Robust fallback for broken/empty/short answers -----
+  // Robust fallback for broken/empty/short answers
   const content = replyObj.content.trim();
-  const tooShort = content.length < 80 && !content.includes('•') && !content.match(/\d\./); // Not a real list or bullet
+  const tooShort = content.length < 80 && !content.includes('•') && !content.match(/\d\./);
   if (
     !content ||
     tooShort ||
@@ -30,7 +23,6 @@ module.exports = function postprocess(replyObj, question = '', intent = '') {
     replyObj.content = "Foi mal, não consegui encontrar uma resposta completa agora. Tente novamente em alguns minutos, ou peça uma explicação mais detalhada!";
     return replyObj;
   }
-  // ---------------------------------------------------------
 
   // Add trust dica for GENERIC/NEWS (if not already present)
   if (['GENERIC', 'NEWS'].includes(intent)) {
