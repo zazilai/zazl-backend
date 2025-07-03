@@ -11,66 +11,7 @@ function dolar(rate) {
   };
 }
 
-// Events: WhatsApp-safe, max 3 events, minimal formatting
-function events(list = [], city = '', fallbackText = '', userQuery = '') {
-  const dicas = [
-    'Chegue cedo pra garantir o melhor lugar!',
-    'Convide amigos — quanto mais gente, melhor!',
-    'Fique de olho nos grupos de brasileiros da sua cidade!',
-    'Leve sua bandeira do Brasil pra animar ainda mais!',
-    'Eventos brasileiros costumam lotar rápido – garanta seu ingresso!'
-  ];
-  const dica = dicas[Math.floor(Math.random() * dicas.length)];
-
-  if (Array.isArray(list) && list.length > 0) {
-    const header = `🎉 Eventos Brasileiros${city ? ` em ${city}` : ''}:\n`;
-    const lines = list.slice(0, 3).map(evt => {
-      const name = evt.name || 'Evento';
-      const location = (evt.address && evt.address.local_name) || evt.location || '';
-      const dateIso = evt.start_at || evt.start_time || '';
-      let eventUrl =
-        evt.buy_link ||
-        evt.external_shop_url ||
-        evt.url ||
-        evt.facebook_link ||
-        evt.instagram_link ||
-        '';
-      let formattedDate = '';
-      if (dateIso) {
-        try {
-          const d = new Date(dateIso);
-          formattedDate = `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
-        } catch {}
-      }
-      return [
-        `🗓️ ${name}`,
-        location ? `📍 ${location}` : '',
-        formattedDate ? `🕒 ${formattedDate}` : '',
-        eventUrl ? `Mais informações: ${eventUrl}` : ''
-      ].filter(Boolean).join('\n');
-    }).join('\n\n');
-    return {
-      type: 'text',
-      content: [
-        header,
-        lines,
-        `\nDica do Zazil: ${dica}`
-      ].filter(Boolean).join('\n')
-    };
-  }
-  if (fallbackText && fallbackText.trim().length > 10) {
-    return { type: 'text', content: fallbackText.trim() };
-  }
-  return {
-    type: 'text',
-    content: [
-      `📅 Não achei eventos brasileiros${city ? ` em ${city}` : ''} agora.`,
-      `\nDica do Zazil: ${dica}`
-    ].filter(Boolean).join('\n')
-  };
-}
-
-// Amazon: WhatsApp-safe, ONLY ONE product, always returns reply with link if possible
+// Amazon: Only for product/shopping queries, one product max
 function amazon(items) {
   if (!Array.isArray(items) || !items.length) {
     return {
@@ -78,36 +19,57 @@ function amazon(items) {
       content: '🔎 Não encontrei produtos relevantes na Amazon agora. Tente buscar de outra forma ou com palavras mais específicas!'
     };
   }
-  if (items[0].answer) {
+  const i = items[0];
+  return {
+    type: 'text',
+    content: [
+      `🛒 *Dica do Zazil – Produto na Amazon*`,
+      i.title ? `Produto: ${i.title}` : '',
+      i.price ? `Preço: ${i.price}` : '',
+      i.url ? `Comprar: ${i.url}` : '',
+      `\nDica: Sempre confira as avaliações e comentários antes de comprar!`
+    ].filter(Boolean).join('\n')
+  };
+}
+
+// Events: Only called when eventsDica fires; never added on product/news/etc.
+function events(list = [], city = '', fallbackText = '') {
+  if (!Array.isArray(list) || !list.length) {
     return {
       type: 'text',
-      content: `Não achei produtos relevantes na Amazon, mas fiz uma busca extra pra te ajudar:\n\n${items[0].answer}`
+      content: fallbackText && fallbackText.trim().length > 10
+        ? fallbackText.trim()
+        : `📅 Não achei eventos brasileiros${city ? ` em ${city}` : ''} agora.\nDica do Zazil: Confira sempre grupos e páginas de brasileiros para novidades!`
     };
   }
-  // Only one product for maximum deliverability
-  const i = items[0];
-  const title = i.title || 'Produto';
-  const price = i.price || 'Preço não disponível';
-  const url = i.url || '';
-  const dica = "\n\nDica: Sempre verifique as avaliações dos produtos antes de comprar na Amazon!";
-  let content;
-  if (url) {
-    content = [
-      `Produto recomendado na Amazon:`,
-      `🛒 ${title}`,
-      `💰 ${price}`,
-      `Comprar: ${url}`,
-      dica
+
+  const header = `💡 *Dica do Zazil – Eventos Brasileiros nos EUA*`;
+  const lines = list.slice(0, 3).map(evt => {
+    const name = evt.name || 'Evento';
+    const cityLine = evt.address?.city ? `📍 ${evt.address.city}` : '';
+    const location = evt.address?.local_name || evt.address?.address || '';
+    const dateIso = evt.start_at || '';
+    let formattedDate = '';
+    if (dateIso) {
+      try {
+        const d = new Date(dateIso);
+        formattedDate = `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      } catch {}
+    }
+    const link = evt.external_shop_url || evt.instagram_link || evt.facebook_link || '';
+    return [
+      `🗓️ ${name}`,
+      cityLine,
+      location ? `🏟️ ${location}` : '',
+      formattedDate ? `🕒 ${formattedDate}` : '',
+      link ? `🎟️ Ingressos: ${link}` : ''
     ].filter(Boolean).join('\n');
-  } else {
-    content = [
-      `Produto recomendado na Amazon:`,
-      `🛒 ${title}`,
-      `💰 ${price}`,
-      dica
-    ].filter(Boolean).join('\n');
-  }
-  return { type: 'text', content };
+  }).join('\n\n');
+
+  return {
+    type: 'text',
+    content: [header, lines, `\nDica: Chegue cedo, convide amigos e confirme o local antes de comprar ingressos!`].filter(Boolean).join('\n\n')
+  };
 }
 
 function news(digest = '') {

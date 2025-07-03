@@ -1,13 +1,13 @@
 // helpers/partners/eventsDica.js
+
 const axios = require('axios');
 
-// Normalize/canonicalize a city name
+// Utility to normalize city for matching
 function normalizeCity(city = '') {
   if (!city) return '';
   return city.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-// Format a single event for WhatsApp
 function formatEvent(evt) {
   const name = evt.name || 'Evento';
   const city = evt.address?.city || '';
@@ -32,20 +32,15 @@ function formatEvent(evt) {
   return line;
 }
 
-/**
- * Returns a WhatsApp-formatted Dica block for up to 3 events.
- * @param {string} userMessage
- * @param {string} userCity
- * @param {string} userContext
- * @param {string} intent
- * @returns {Promise<string>}
- */
-module.exports = async function eventsDica(userMessage, userCity, userContext, intent) {
-  // Only answer for GENERIC, EVENT, NEWS, or if question is "current"
-  if (intent && !['EVENT', 'GENERIC', 'NEWS'].includes(intent)) return '';
+// Main
+module.exports = async function eventsDica(message, userCity, userContext, intent) {
+  // Only fire for event/agenda/show queries
+  if (
+    intent !== 'EVENT' &&
+    !/\b(evento|agenda|show|balada|festa|programa|o que fazer)\b/i.test(message)
+  ) return '';
 
   let city = userCity;
-  // Try to extract a city from context if not present
   if (!city && userContext) {
     const match = userContext.match(/moro em ([\w\s]+)/i);
     if (match) city = match[1].trim();
@@ -58,21 +53,22 @@ module.exports = async function eventsDica(userMessage, userCity, userContext, i
     if (Array.isArray(res.data)) events = res.data;
   } catch (e) {
     console.error('[eventsDica] Groovoo API error:', e);
-    return ''; // Fail silently
+    return '';
   }
+
   if (!events.length) return '';
 
-  // Filter by city (if any)
+  // Try to filter by city if available
   let foundEvents = [];
   if (city) {
     const normCity = normalizeCity(city);
     foundEvents = events.filter(evt => normalizeCity(evt?.address?.city) === normCity);
-    if (foundEvents.length < 1) foundEvents = events;
+    if (!foundEvents.length) foundEvents = events;
   } else {
     foundEvents = events;
   }
 
-  // Sort by start date, only upcoming, top 3
+  // Sort and pick top 3
   foundEvents = foundEvents
     .filter(evt => !!evt.start_at)
     .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
@@ -83,7 +79,7 @@ module.exports = async function eventsDica(userMessage, userCity, userContext, i
   let dicaBlock =
     `💡 *Dica do Zazil – Eventos Brasileiros nos EUA*\n` +
     foundEvents.map(formatEvent).join('\n\n') +
-    `\n\nDica: Chegue cedo, convide amigos e confira sempre o link oficial antes de comprar ingressos!`;
+    `\n\nDica: Chegue cedo para garantir seu lugar, convide amigos, e confira sempre o link oficial antes de comprar ingressos!`;
 
   return dicaBlock.trim();
 };

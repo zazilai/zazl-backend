@@ -1,4 +1,5 @@
 // helpers/partners/amazonDica.js
+
 const axios = require('axios');
 const crypto = require('crypto');
 const replyHelper = require('../reply');
@@ -8,7 +9,6 @@ const secretKey = process.env.AMAZON_PA_SECRET_KEY;
 const partnerTag = process.env.AMAZON_PA_PARTNER_TAG;
 const marketplace = process.env.AMAZON_PA_MARKET || 'www.amazon.com';
 
-// AWS Signature helpers (same as before)
 function sign(key, msg) {
   return crypto.createHmac('sha256', key).update(msg, 'utf8').digest();
 }
@@ -20,7 +20,7 @@ function getSignatureKey(key, dateStamp, regionName, serviceName) {
   return kSigning;
 }
 
-// Core API Search
+// --- Amazon Product Advertising API search ---
 async function searchAmazonProducts(query) {
   const region = 'us-east-1';
   const service = 'ProductAdvertisingAPI';
@@ -36,7 +36,6 @@ async function searchAmazonProducts(query) {
     "Resources": [
       "Images.Primary.Medium",
       "ItemInfo.Title",
-      "ItemInfo.ByLineInfo",
       "Offers.Listings.Price"
     ]
   };
@@ -51,6 +50,7 @@ async function searchAmazonProducts(query) {
   const canonicalRequest = [
     'POST', canonicalUri, '', canonicalHeaders, signedHeaders, payloadHash
   ].join('\n');
+
   const algorithm = 'AWS4-HMAC-SHA256';
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const stringToSign = [
@@ -64,6 +64,7 @@ async function searchAmazonProducts(query) {
     `SignedHeaders=${signedHeaders}`,
     `Signature=${signature}`
   ].join(', ');
+
   const headers = {
     'Content-Encoding': 'amz-1.0',
     'Content-Type': 'application/json; charset=UTF-8',
@@ -83,26 +84,21 @@ async function searchAmazonProducts(query) {
   })).filter(i => i.title && i.url);
 }
 
-/**
- * Returns up to 3 Amazon products as WhatsApp dica blocks (array of strings), only if intent is 'AMAZON' or 'GENERIC'
- * @param {string} message
- * @param {string} city
- * @param {string} context
- * @param {string} intent
- * @returns {Promise<string[]>}
- */
+// Main
 module.exports = async function amazonDica(message, city, context, intent) {
-  if (intent !== 'AMAZON' && intent !== 'GENERIC') return [];
-  if (!accessKey || !secretKey || !partnerTag) {
-    console.error('[amazonDica] Amazon env not set');
-    return [];
-  }
+  // Only run if the question is about products/shopping
+  if (
+    intent !== 'AMAZON' &&
+    !/\b(comprar|produto|preço|quanto custa|amazon|onde|loja)\b/i.test(message)
+  ) return [];
+
+  if (!accessKey || !secretKey || !partnerTag) return [];
 
   try {
     const items = await searchAmazonProducts(message);
-    if (!items || !items.length) return [];
-    // Only top 3 products
-    return items.slice(0, 3).map(item => replyHelper.amazon([item]).content);
+    if (!items.length) return [];
+    // Only ONE top dica (best product)
+    return [replyHelper.amazon([items[0]]).content];
   } catch (err) {
     console.error('[amazonDica] API error:', err?.response?.data || err);
     return [];
