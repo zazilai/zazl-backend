@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Orchestrated, Smart, No Keyword Hacks, Great Product)
+// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, No Keyword Hacks)
 
 require('dotenv').config();
 const express = require('express');
@@ -6,7 +6,6 @@ const bodyParser = require('body-parser');
 const { admin } = require('./helpers/firebase');
 const { OpenAI } = require('openai');
 
-const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const profileSvc = require('./helpers/profile');
@@ -39,6 +38,14 @@ function truncateForWhatsapp(msg, maxLen = 950) {
   return msg.slice(0, maxLen - 20) + '\n...(resposta resumida)';
 }
 
+// Only real keywords: cancel, greeting (user experience)
+const isCancel = text =>
+  /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(text) ||
+  text.includes('cancelar zazil') || text.includes('cancelar plano') || text.includes('cancelar assinatura') ||
+  text.includes('cancel my plan') || text.includes('cancel subscription');
+
+const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
+
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -47,10 +54,10 @@ app.use(manageRoute);
 app.use(viewRoute);
 app.get('/', (req, res) => res.send('✅ Zazil backend up'));
 
-// --- SMART, GREAT PRODUCT ORCHESTRATION ---
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
   const waNumber = req.body.From;
+  const incomingLower = incoming.toLowerCase();
 
   try {
     // Onboard if new
@@ -61,7 +68,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
-    // Quota
+    // Quota check
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const upgradeMsg = replyHelper.upgrade(waNumber);
@@ -69,31 +76,21 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // CANCEL (hard-coded for UX)
-    const incomingLower = incoming.toLowerCase();
-    if (
-      /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(incomingLower) ||
-      incomingLower.includes('cancelar zazil') ||
-      incomingLower.includes('cancelar plano') ||
-      incomingLower.includes('cancelar assinatura') ||
-      incomingLower.includes('cancel my plan') ||
-      incomingLower.includes('cancel subscription') ||
-      incomingLower.includes('cancel zazil')
-    ) {
+    // CANCEL (user experience only!)
+    if (isCancel(incomingLower)) {
       const cancelMsg = replyHelper.cancel(waNumber);
       res.type('text/xml');
       return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // GREETING (hard-coded for UX)
-    const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
+    // GREETING
     if (greetingRegex.test(incoming)) {
       const greetReply = replyHelper.greeting();
       res.type('text/xml');
       return res.send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // Personalization
+    // Load personalization
     let profileDoc, memorySummary = '', city = '';
     try {
       profileDoc = await db.collection('profiles').doc(waNumber).get();
@@ -101,25 +98,25 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
     } catch (e) { city = ''; }
 
-    // Intent detection (model-based, not keywords!)
-    const intent = await classifyIntent(incoming);
-    console.log('[twilio] classifyIntent →', intent);
+    // Future-proof current detector (use as little keyword as possible)
+    const isCurrentQuestion = (text) =>
+      /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data|evento|show|agenda)\b/i.test(text);
 
-    // Main answer: always smart, city-aware, never keyword-driven
+    // MAIN ANSWER: Perplexity for current/event/news, GPT-4o for everything else
     let mainAnswer = '';
     let usedModel = '';
     const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : 'EUA';
 
     try {
-      // Perplexity for "current" stuff (intent = NEWS, or GENERIC with date/time flavor)
-      if (intent === 'NEWS' || (intent === 'GENERIC' && isCurrentQuestion(incoming))) {
+      if (isCurrentQuestion(incoming)) {
+        // Perplexity is always first for news/events/current
         const { answer } = await perplexityService.search(incoming, cityForPrompt);
         mainAnswer = answer || '';
         usedModel = 'Perplexity';
         if (!mainAnswer || mainAnswer.length < 30) {
-          // Fallback: GPT-4.1
+          // Fallback: GPT-4o
           const gpt = await openai.chat.completions.create({
-            model: 'gpt-4.1',
+            model: 'gpt-4o',
             temperature: 0.3,
             max_tokens: 2048,
             messages: [
@@ -128,12 +125,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
             ]
           });
           mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
-          usedModel = 'GPT-4.1 (fallback)';
+          usedModel = 'GPT-4o (fallback)';
         }
       } else {
-        // Everything else: GPT-4.1, always with city/context if available
+        // Everything else: GPT-4o
         const gpt = await openai.chat.completions.create({
-          model: 'gpt-4.1',
+          model: 'gpt-4o',
           temperature: 0.3,
           max_tokens: 2048,
           messages: [
@@ -142,7 +139,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           ]
         });
         mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
-        usedModel = 'GPT-4.1';
+        usedModel = 'GPT-4o';
       }
       console.log(`[AI] Answer generated by: ${usedModel}`);
     } catch (err) {
@@ -150,50 +147,48 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       mainAnswer = "Desculpe, não consegui responder sua pergunta agora.";
     }
 
-    // Marketplace Dica is always additive — never blocks or replaces the main answer.
+    // Marketplace Dica (always additive)
     let marketplaceDica = '';
     try {
       marketplaceDica = await getMarketplaceDica({
         message: incoming,
         city,
         context: memorySummary,
-        intent
       });
     } catch (e) {
       console.error('[Marketplace Dica] Error:', e);
       marketplaceDica = '';
     }
 
-    // Compose for WhatsApp, always main answer + marketplace dica (if any)
+    // Compose WhatsApp message: always main + dica (never overwrites)
     let finalContent = mainAnswer && mainAnswer.trim();
     if (marketplaceDica) {
       finalContent += `\n\n${marketplaceDica}`;
     } else {
-      // If no partner dica, always close with a general "Dica do Zazil" (prompt-based, not hard-coded)
+      // Always close with a general Dica (prompt-based, not hard-coded ideally)
       finalContent += '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
     }
     finalContent = finalContent.trim();
 
     let replyObj = replyHelper.generic(finalContent);
-    replyObj = postprocess(replyObj, incoming, intent);
+    replyObj = postprocess(replyObj, incoming);
 
-    // Memory update (as before)
+    // Memory update
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
-    if (['GENERIC', 'NEWS'].includes(intent)) {
-      try {
-        const profileDoc = db.collection('profiles').doc(waNumber);
-        const old = memorySummary || '';
-        memorySvc.updateUserSummary(old, incoming)
-          .then(summary => {
-            if (summary && summary !== old) {
-              profileDoc.set({ memory: summary }, { merge: true });
-            }
-          })
-          .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
-      } catch (e) { console.error('[MEMORY] Outer error:', e); }
-    }
+    // Optionally update memory only for longer chats
+    try {
+      const profileDoc = db.collection('profiles').doc(waNumber);
+      const old = memorySummary || '';
+      memorySvc.updateUserSummary(old, incoming)
+        .then(summary => {
+          if (summary && summary !== old) {
+            profileDoc.set({ memory: summary }, { merge: true });
+          }
+        })
+        .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
+    } catch (e) { console.error('[MEMORY] Outer error:', e); }
 
-    // Fallback for empty replyObj; truncate long replies
+    // Truncate for WhatsApp, robust fallback
     let safeContent = replyHelper.fallback().content;
     if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
       safeContent = truncateForWhatsapp(replyObj.content, 950);
@@ -210,7 +205,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       safeContent = replyHelper.fallback().content;
     }
 
-    console.log(`[index.cjs] Intent: ${intent} | Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
+    console.log(`[index.cjs] Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
     res.type('text/xml');
     res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
@@ -226,11 +221,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     res.send(`<Response><Message>${replyHelper.fallback().content}</Message></Response>`);
   }
 });
-
-function isCurrentQuestion(text) {
-  // Try to minimize keyword hacks: here only for "current" (date/time/news context)
-  return /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data)\b/i.test(text);
-}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));

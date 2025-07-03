@@ -1,35 +1,23 @@
-// helpers/perplexity.js
+// helpers/perplexity.js — Zazil Great Product (2025, future-proof)
 
 const fetch = require('node-fetch');
 const API_KEY = process.env.PPLX_API_KEY;
 const BASE_URL = 'https://api.perplexity.ai/chat/completions';
 
 /**
- * Always adds user location (city or 'EUA') and retail context for US queries.
+ * Build Perplexity prompt with user context.
+ * No hard-coded filters — simply state user context when possible.
  */
 function buildPerplexityPrompt(query, city) {
-  let contextGuide = '';
-  if (/passaporte|consulado|embaixada|documento|renovar/i.test(query)) {
-    contextGuide = `
-Atenção: O usuário está nos EUA${city ? `, na cidade de ${city}` : ''}. Sempre responda de acordo com os procedimentos, instituições e serviços disponíveis para brasileiros NOS ESTADOS UNIDOS${city ? `, especialmente em ${city}` : ''}. Sempre forneça links oficiais se possível.
-    `.trim();
-  } else if (/comprar|produto|loja|preço|amazon|walmart|target|best buy|custa|encontro/i.test(query)) {
-    contextGuide = `
-O usuário está nos EUA${city ? `, na cidade de ${city}` : ''}. Sempre sugira lojas e serviços disponíveis nos EUA, como Amazon, Best Buy, Walmart, Target, Costco, Sam’s Club ou mercados brasileiros locais, NUNCA lojas do Brasil como Mercado Livre, Magalu, Americanas, Rappi etc.
-    `.trim();
-  } else if (/evento|show|festa|balada|programa|agenda|o que fazer|acontece|tem pra fazer/i.test(query)) {
-    contextGuide = `
-O usuário está nos EUA${city ? `, na cidade de ${city}` : ''}. Responda apenas com eventos e atividades relevantes para brasileiros nessa cidade ou região.
-    `.trim();
+  let base = `${query}`;
+  if (city && city.length > 1 && city.toLowerCase() !== 'eua') {
+    base += `\n\nO usuário está em ${city} nos EUA.`;
   } else {
-    contextGuide = `
-Considere que o usuário está nos EUA${city ? `, na cidade de ${city}` : ''}. Todas as recomendações, orientações e informações devem ser relevantes para brasileiros no exterior, especialmente nos EUA.
-    `.trim();
+    base += `\n\nO usuário está nos EUA.`;
   }
-  return `${query}\n\n${contextGuide}`;
+  return base;
 }
 
-// Helper to wrap fetch with timeout for resilience
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   return Promise.race([
     fetch(url, options),

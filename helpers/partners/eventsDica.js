@@ -1,23 +1,13 @@
 // helpers/partners/eventsDica.js
-
 const axios = require('axios');
 
-/**
- * Normalize city names to match more easily.
- */
+// Normalize/canonicalize a city name
 function normalizeCity(city = '') {
   if (!city) return '';
-  return city
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Remove accents
-    .replace(/[\s\-]+/g, ' ');       // Standardize spaces
+  return city.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-/**
- * Format a Groovoo event as a WhatsApp-friendly string.
- */
+// Format a single event for WhatsApp
 function formatEvent(evt) {
   const name = evt.name || 'Evento';
   const city = evt.address?.city || '';
@@ -43,61 +33,57 @@ function formatEvent(evt) {
 }
 
 /**
- * Main Zazil marketplace Dica for Brazilian events.
+ * Returns a WhatsApp-formatted Dica block for up to 3 events.
  * @param {string} userMessage
  * @param {string} userCity
  * @param {string} userContext
- * @returns {Promise<string[]>} — array of dica blocks, max 3
+ * @param {string} intent
+ * @returns {Promise<string>}
  */
-module.exports = async function eventsDica(userMessage, userCity, userContext) {
-  // Try to get city from userCity or context
+module.exports = async function eventsDica(userMessage, userCity, userContext, intent) {
+  // Only answer for GENERIC, EVENT, NEWS, or if question is "current"
+  if (intent && !['EVENT', 'GENERIC', 'NEWS'].includes(intent)) return '';
+
   let city = userCity;
-  if ((!city || city.length < 2) && userContext) {
+  // Try to extract a city from context if not present
+  if (!city && userContext) {
     const match = userContext.match(/moro em ([\w\s]+)/i);
     if (match) city = match[1].trim();
   }
 
-  // Fetch all Groovoo events
+  // Call Groovoo API
   let events = [];
   try {
     const res = await axios.get('https://api.groovoo.io/ticketing_events', { timeout: 3000 });
     if (Array.isArray(res.data)) events = res.data;
   } catch (e) {
     console.error('[eventsDica] Groovoo API error:', e);
-    return [];
+    return ''; // Fail silently
   }
-  if (!events.length) return [];
+  if (!events.length) return '';
 
-  // Filter events by city if possible, otherwise show top upcoming
+  // Filter by city (if any)
   let foundEvents = [];
-  if (city && city.length > 1) {
+  if (city) {
     const normCity = normalizeCity(city);
     foundEvents = events.filter(evt => normalizeCity(evt?.address?.city) === normCity);
-    // If not enough, include general US events
     if (foundEvents.length < 1) foundEvents = events;
   } else {
     foundEvents = events;
   }
 
-  // Sort by date (upcoming first), limit to 3
+  // Sort by start date, only upcoming, top 3
   foundEvents = foundEvents
     .filter(evt => !!evt.start_at)
     .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
     .slice(0, 3);
 
-  if (!foundEvents.length) return [];
+  if (!foundEvents.length) return '';
 
-  // WhatsApp block: One message per event, with header only on first
-  const dicaBlocks = foundEvents.map((evt, idx) => {
-    const header = idx === 0 ? '💡 *Dica do Zazil – Eventos Brasileiros nos EUA*\n' : '';
-    return header + formatEvent(evt);
-  });
+  let dicaBlock =
+    `💡 *Dica do Zazil – Eventos Brasileiros nos EUA*\n` +
+    foundEvents.map(formatEvent).join('\n\n') +
+    `\n\nDica: Chegue cedo, convide amigos e confira sempre o link oficial antes de comprar ingressos!`;
 
-  // Add a closing recommendation (on last only)
-  if (dicaBlocks.length) {
-    dicaBlocks[dicaBlocks.length - 1] +=
-      '\n\nDica: Chegue cedo para garantir seu lugar, convide amigos, e confira sempre o link oficial antes de comprar ingressos!';
-  }
-
-  return dicaBlocks;
+  return dicaBlock.trim();
 };
