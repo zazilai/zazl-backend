@@ -2,13 +2,22 @@
 
 const axios = require('axios');
 
-// Utility to clean and normalize a city string
+/**
+ * Normalize city names to match more easily.
+ */
 function normalizeCity(city = '') {
   if (!city) return '';
-  return city.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return city
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove accents
+    .replace(/[\s\-]+/g, ' ');       // Standardize spaces
 }
 
-// Utility to format the event as WhatsApp-friendly
+/**
+ * Format a Groovoo event as a WhatsApp-friendly string.
+ */
 function formatEvent(evt) {
   const name = evt.name || 'Evento';
   const city = evt.address?.city || '';
@@ -33,52 +42,62 @@ function formatEvent(evt) {
   return line;
 }
 
+/**
+ * Main Zazil marketplace Dica for Brazilian events.
+ * @param {string} userMessage
+ * @param {string} userCity
+ * @param {string} userContext
+ * @returns {Promise<string[]>} — array of dica blocks, max 3
+ */
 module.exports = async function eventsDica(userMessage, userCity, userContext) {
+  // Try to get city from userCity or context
   let city = userCity;
-  // Try to extract a city from the message/context if not present
-  if (!city && userContext) {
+  if ((!city || city.length < 2) && userContext) {
     const match = userContext.match(/moro em ([\w\s]+)/i);
     if (match) city = match[1].trim();
   }
 
-  // Call the Groovoo API
+  // Fetch all Groovoo events
   let events = [];
   try {
     const res = await axios.get('https://api.groovoo.io/ticketing_events', { timeout: 3000 });
     if (Array.isArray(res.data)) events = res.data;
   } catch (e) {
     console.error('[eventsDica] Groovoo API error:', e);
-    return ''; // Fail silently
+    return [];
   }
+  if (!events.length) return [];
 
-  if (!events.length) return '';
-
-  // Try to filter by city if we have one
+  // Filter events by city if possible, otherwise show top upcoming
   let foundEvents = [];
-  if (city) {
+  if (city && city.length > 1) {
     const normCity = normalizeCity(city);
     foundEvents = events.filter(evt => normalizeCity(evt?.address?.city) === normCity);
-    // If not enough events, show general US events
-    if (foundEvents.length < 1) {
-      foundEvents = events;
-    }
+    // If not enough, include general US events
+    if (foundEvents.length < 1) foundEvents = events;
   } else {
     foundEvents = events;
   }
 
-  // Sort by start date, upcoming first
+  // Sort by date (upcoming first), limit to 3
   foundEvents = foundEvents
     .filter(evt => !!evt.start_at)
     .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
     .slice(0, 3);
 
-  if (!foundEvents.length) return '';
+  if (!foundEvents.length) return [];
 
-  // Build the message block
-  let dicaBlock =
-    `💡 *Dica do Zazil – Eventos Brasileiros nos EUA*\n` +
-    foundEvents.map(formatEvent).join('\n\n') +
-    `\n\nDica: Chegue cedo para garantir seu lugar, convide amigos, e confira sempre o link oficial antes de comprar ingressos!`;
+  // WhatsApp block: One message per event, with header only on first
+  const dicaBlocks = foundEvents.map((evt, idx) => {
+    const header = idx === 0 ? '💡 *Dica do Zazil – Eventos Brasileiros nos EUA*\n' : '';
+    return header + formatEvent(evt);
+  });
 
-  return dicaBlock.trim();
+  // Add a closing recommendation (on last only)
+  if (dicaBlocks.length) {
+    dicaBlocks[dicaBlocks.length - 1] +=
+      '\n\nDica: Chegue cedo para garantir seu lugar, convide amigos, e confira sempre o link oficial antes de comprar ingressos!';
+  }
+
+  return dicaBlocks;
 };
