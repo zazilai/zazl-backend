@@ -2,21 +2,29 @@
 
 const amazonDica = require('./partners/amazonDica');
 const eventsDica = require('./partners/eventsDica');
-// Plug more: lawyerDica, restaurantDica, etc.
 
 async function getMarketplaceDica({ message, city, context }) {
   const dicas = [];
 
-  // Run each partner dica — you can prioritize order, or use only the first found.
-  const amazon = await amazonDica(message, city, context);
-  if (amazon) dicas.push(amazon);
+  // Amazon "Dica" (product-related)
+  try {
+    const amazon = await amazonDica(message, city, context);
+    if (amazon) dicas.push(amazon);
+  } catch (e) {
+    console.error('[MarketplaceDica] amazonDica error:', e);
+  }
 
-  const events = await eventsDica(message, city, context);
-  if (events) dicas.push(events);
+  // Events "Dica" (event-related)
+  try {
+    const events = await eventsDica(message, city, context);
+    if (events) dicas.push(events);
+  } catch (e) {
+    console.error('[MarketplaceDica] eventsDica error:', e);
+  }
 
-  // TODO: add more partners here as needed (lawyer, restaurant, promo, etc)
+  // Add more partners here as needed
 
-  // Join all non-empty dicas, separated by line breaks
+  // Always purely additive, never blocks
   return dicas.join('\n\n');
 }
 

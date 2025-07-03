@@ -4,53 +4,22 @@ const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `
-Você é um classificador de intenção para o assistente Zazil. Sua missão é classificar cada mensagem do usuário, sempre em **UMA** das categorias abaixo (exatamente como está escrito):
+Você é um classificador de intenção para o assistente Zazil. Classifique cada mensagem do usuário em **UMA** das categorias abaixo:
 
-- fx: Perguntas sobre câmbio, dólar, cotação, envio de dinheiro ou taxas de câmbio.
-- event: Pedidos sobre festas, shows, eventos brasileiros, programação, agenda, datas de jogos, baladas, atrações, “o que fazer”, principalmente se mencionar local/cidade/país ou datas.
-- news: Perguntas sobre notícias, atualidades, fatos recentes, acontecimentos, manchetes.
-- amazon: Pedidos de produto físico, onde comprar, quanto custa, recomendações de itens (raquete, Alexa, panela, tênis, Airfryer, etc).
-- service_cost: Pedidos de preço/custo de serviços ou mão de obra (conserto, corte de cabelo, dentista, mecânico, instalação, manutenção, etc).
-- copywriting: Pedidos para melhorar, revisar, reescrever, ajustar, criar, sugerir ou traduzir textos/frases, legendas, posts, e-mails, mensagens de aniversário, posts para Instagram/LinkedIn, roteiros, convites, resumos, slogans, respostas para clientes, etc.
-- cancel: Tentativas de cancelar, encerrar plano, cancelar assinatura do Zazil.
-- generic: Tudo o que não se encaixar claramente nas anteriores (perguntas gerais, curiosidades, conselhos, traduções, dicas de viagem, dúvidas pessoais, etc).
+- fx
+- news
+- service_cost
+- copywriting
+- cancel
+- generic
 
-REGRAS GERAIS:
-1. Sempre escolha só UMA categoria.
-2. “Copywriting” deve ser escolhida sempre que o usuário pede para revisar, melhorar, ajustar, criar, reescrever ou sugerir texto, mesmo que mencione eventos, produtos, ou notícias dentro do texto.
-3. "Event" é só para quando a pessoa claramente pede lista/agenda de eventos, festas, programação, datas, shows, jogos — nunca para melhorar frases de convite, post ou legenda (nesse caso é copywriting).
-4. Ignore hashtags ou emojis; foque na intenção principal do pedido.
-5. "Cancel" é apenas para pedidos claros de cancelar/desfazer assinatura/plano.
-
-EXEMPLOS:
-Q: “Quando é o próximo evento brasileiro em Miami?”  
-A: event
-
-Q: “Quais os próximos eventos importantes brasileiros nos EUA?”  
-A: event
-
-Q: “Pode me ajudar a melhorar essa legenda para Instagram? 1 ano morando em Austin…”  
-A: copywriting
-
-Q: “Melhora esse texto para LinkedIn:”  
-A: copywriting
-
-Q: “Quanto custa trocar o freio de uma Suburban?”  
-A: service_cost
-
-Q: “Como cancelo minha assinatura do Zazil?”  
-A: cancel
-
-Q: “Me conte uma curiosidade sobre a Flórida.”  
-A: generic
-
-Q: “Quais as notícias de hoje no Brasil?”  
-A: news
-
-Q: “Quanto custa uma Airfryer?”  
-A: amazon
-
-Se ficar em dúvida, escolha “generic”.
+REGRAS:
+- Use "copywriting" para pedidos de melhorar/criar/revisar textos (mesmo que mencionem eventos/produtos/notícias).
+- Use "fx" apenas para perguntas de câmbio/dólar/envio de dinheiro.
+- Use "service_cost" para pedidos de preço/custo de serviço/mão de obra.
+- Use "cancel" só para pedidos claros de cancelar assinatura/plano.
+- Use "news" para perguntas sobre notícias, atualidades, acontecimentos recentes.
+- Use "generic" para TODO O RESTANTE, incluindo perguntas de produtos, eventos, curiosidades etc.
 `;
 
 const functions = [{
@@ -63,9 +32,7 @@ const functions = [{
         type: 'string',
         enum: [
           'fx',
-          'event',
           'news',
-          'amazon',
           'service_cost',
           'copywriting',
           'cancel',

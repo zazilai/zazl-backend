@@ -10,7 +10,7 @@ const classifyIntent = require('./helpers/classifyIntent');
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const profileSvc = require('./helpers/profile');
-const getMarketplaceDica = require('./helpers/marketplaceDica'); // NEW
+const getMarketplaceDica = require('./helpers/marketplaceDica');
 const perplexityService = require('./helpers/perplexity');
 const postprocess = require('./helpers/postprocess');
 const memorySvc = require('./helpers/memory');
@@ -20,7 +20,6 @@ const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
-const serviceCost = require('./helpers/service_cost');
 
 const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -101,7 +100,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
     } catch (e) { city = ''; }
 
-    // Intent detection
+    // Intent detection (now simplified!)
     const intent = await classifyIntent(incoming);
     console.log('[twilio] classifyIntent →', intent);
 
@@ -111,18 +110,27 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : 'EUA';
 
     try {
-      // NEWS or GENERIC with "current event" keywords → Perplexity
-      if (
-        intent === 'NEWS' ||
-        (
-          intent === 'GENERIC' &&
-          /\b(hoje|atualiza|notícia|noticias|aconteceu|agora|última hora|breaking|eventos?|agenda|programação|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data|amanhã)\b/i.test(incoming)
-        )
-      ) {
+      if (intent === 'FX') {
+        // FX special handler here if needed
+        // For simplicity, let’s just use GPT for now (implement your own if needed)
+        const gpt = await openai.chat.completions.create({
+          model: 'gpt-4.1',
+          temperature: 0.3,
+          max_tokens: 2048,
+          messages: [
+            { role: 'system', content: ZAZIL_PROMPT },
+            { role: 'user', content: incoming }
+          ]
+        });
+        mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
+        usedModel = 'GPT-4.1 (fx)';
+      } else if (intent === 'NEWS' || (intent === 'GENERIC' && isCurrentQuestion(incoming))) {
+        // Always try Perplexity first for current stuff
         const { answer } = await perplexityService.search(incoming, cityForPrompt);
         mainAnswer = answer || '';
         usedModel = 'Perplexity';
-        if (!mainAnswer || mainAnswer.length < 20) {
+        if (!mainAnswer || mainAnswer.length < 30) {
+          // Fallback: GPT-4.1
           const gpt = await openai.chat.completions.create({
             model: 'gpt-4.1',
             temperature: 0.3,
@@ -136,7 +144,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
           usedModel = 'GPT-4.1 (fallback)';
         }
       } else {
-        // All other intents: GPT-4.1, always city-aware
+        // Everything else: GPT-4.1
         const gpt = await openai.chat.completions.create({
           model: 'gpt-4.1',
           temperature: 0.3,
@@ -165,7 +173,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       usedModel = 'GPT-4.1 (double fallback)';
     }
 
-    // NEW: Marketplace Dica Orchestration!
+    // Always call Marketplace Dica!
     let marketplaceDica = '';
     try {
       marketplaceDica = await getMarketplaceDica({ message: incoming, city, context: memorySummary });
@@ -179,7 +187,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     if (marketplaceDica) {
       finalContent += `\n\n${marketplaceDica}`;
     } else if (['GENERIC', 'NEWS'].includes(intent)) {
-      // Fallback to generic trust dica if no marketplace dica
       finalContent += '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
     }
     finalContent = finalContent.trim();
@@ -190,7 +197,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     // Memory update
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
 
-    if (['GENERIC', 'EVENT', 'AMAZON', 'NEWS'].includes(intent)) {
+    if (['GENERIC', 'NEWS'].includes(intent)) {
       try {
         const profileDoc = db.collection('profiles').doc(waNumber);
         const old = memorySummary || '';
@@ -239,6 +246,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     res.send(`<Response><Message>${replyHelper.fallback().content}</Message></Response>`);
   }
 });
+
+function isCurrentQuestion(text) {
+  // Any time, date, "hoje", "amanhã", or "agora" triggers Perplexity
+  return /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data)\b/i.test(text);
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
