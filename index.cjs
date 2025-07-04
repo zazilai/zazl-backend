@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, Smart Truncation, Dicas Always Present)
+// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, No Keyword Hacks, Smart Truncation)
 
 require('dotenv').config();
 const express = require('express');
@@ -30,12 +30,16 @@ function truncateForWhatsapp(msg, maxLen = 950) {
   return msg.slice(0, maxLen - 20) + '\n...(resposta resumida)';
 }
 
+// Only real keywords: cancel, greeting (user experience)
 const isCancel = text =>
   /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(text) ||
   text.includes('cancelar zazil') || text.includes('cancelar plano') || text.includes('cancelar assinatura') ||
   text.includes('cancel my plan') || text.includes('cancel subscription');
 
 const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
+
+// Smart truncation marker for postprocess
+const TRUNCATE_MARKER = '[TRUNCATE_MARKER]';
 
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -89,7 +93,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
     } catch (e) { city = ''; }
 
-    // Current intent detector (keep as minimal as possible)
+    // Future-proof current detector (use as little keyword as possible)
     const isCurrentQuestion = (text) =>
       /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data|evento|show|agenda)\b/i.test(text);
 
@@ -151,45 +155,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       marketplaceDica = '';
     }
 
-    // -- Compose for WhatsApp (always add marketplace dica(s) if present) --
-    let finalContent = (mainAnswer && mainAnswer.trim()) || '';
-    let willTruncate = false;
-    let fullForWeb = '';
-    let safeContent = '';
-    let truncateId = null;
-
-    if (finalContent.length + (marketplaceDica ? marketplaceDica.length + 2 : 0) > 950) {
-      // Will be truncated: Save full for web, show link, and ALWAYS append marketplace dicas to WhatsApp message!
-      willTruncate = true;
-      fullForWeb = finalContent;
-      if (marketplaceDica) {
-        fullForWeb += `\n\n${marketplaceDica}`;
-      }
-      // Save full answer to Firestore and build short message with Dicas included
-      const docRef = await db.collection('longReplies').add({
-        waNumber,
-        question: incoming,
-        answer: fullForWeb,
-        createdAt: new Date()
-      });
-      truncateId = docRef.id;
-      // Compose WhatsApp reply: short intro + link + Dica(s)
-      let shortContent = truncateForWhatsapp(finalContent, 750); // Allow room for link + dica(s)
-      shortContent += `\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
-      if (marketplaceDica) {
-        shortContent += `\n\n${marketplaceDica}`;
-      }
-      safeContent = shortContent.trim();
+    // Compose WhatsApp message: always main + dica (never overwrites)
+    let finalContent = mainAnswer && mainAnswer.trim();
+    if (marketplaceDica) {
+      finalContent += `\n\n${marketplaceDica}`;
     } else {
-      // Not truncated, just append as normal
-      if (marketplaceDica) {
-        finalContent += `\n\n${marketplaceDica}`;
-      }
-      safeContent = finalContent.trim();
+      // Always close with a general Dica (prompt-based, not hard-coded ideally)
+      finalContent += '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
     }
+    finalContent = finalContent.trim();
 
-    // Post-process and safety
-    let replyObj = replyHelper.generic(safeContent);
+    // Run postprocess — this will add the [TRUNCATE_MARKER] if needed
+    let replyObj = replyHelper.generic(finalContent);
     replyObj = postprocess(replyObj, incoming);
 
     // Memory update
@@ -206,19 +183,44 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
     } catch (e) { console.error('[MEMORY] Outer error:', e); }
 
-    // Final check: too short, broken, fallback
-    if (
-      !replyObj.content ||
-      replyObj.content.length < 80 ||
-      /^1\.\s*$/.test(replyObj.content.trim()) ||
-      replyObj.content.startsWith('Dica do Zazil')
-    ) {
-      replyObj.content = replyHelper.fallback().content;
+    // Handle truncation
+    let safeContent = replyHelper.fallback().content;
+    let truncateId = null;
+    let shortContent = replyObj.content;
+
+    if (typeof replyObj.content === 'string' && replyObj.content.trim()) {
+      // Look for marker inserted by postprocess
+      const markerIndex = replyObj.content.indexOf('[TRUNCATE_MARKER]');
+      if (markerIndex >= 0) {
+        shortContent = replyObj.content.slice(0, markerIndex).trim();
+        // Save full reply to Firestore for view link
+        const longContent = replyObj.content.replace('[TRUNCATE_MARKER]', '').trim();
+        const docRef = await db.collection('longReplies').add({
+          waNumber,
+          question: incoming,
+          answer: longContent,
+          createdAt: new Date()
+        });
+        truncateId = docRef.id;
+        shortContent += `\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
+      }
+      safeContent = truncateForWhatsapp(shortContent, 950);
+    } else {
+      console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
 
-    console.log(`[index.cjs] Outgoing reply length: ${replyObj.content.length} | Used model: ${usedModel}`);
+    // Final check: too short, broken, fallback
+    if (
+      safeContent.length < 80 ||
+      /^1\.\s*$/.test(safeContent.trim()) ||
+      safeContent.startsWith('Dica do Zazil')
+    ) {
+      safeContent = replyHelper.fallback().content;
+    }
+
+    console.log(`[index.cjs] Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
     res.type('text/xml');
-    res.send(`<Response><Message>${replyObj.content}</Message></Response>`);
+    res.send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
     if (
