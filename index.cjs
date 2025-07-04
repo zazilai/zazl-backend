@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, No Keyword Hacks, Smart Truncation)
+// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, Smart Dicas + Truncation)
 
 require('dotenv').config();
 const express = require('express');
@@ -24,11 +24,7 @@ const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
-function truncateForWhatsapp(msg, maxLen = 950) {
-  if (!msg) return '';
-  if (msg.length <= maxLen) return msg;
-  return msg.slice(0, maxLen - 20) + '\n...(resposta resumida)';
-}
+const MAX_WHATSAPP_LEN = 950;
 
 // Only real keywords: cancel, greeting (user experience)
 const isCancel = text =>
@@ -37,9 +33,6 @@ const isCancel = text =>
   text.includes('cancel my plan') || text.includes('cancel subscription');
 
 const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
-
-// Smart truncation marker for postprocess
-const TRUNCATE_MARKER = '[TRUNCATE_MARKER]';
 
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -143,68 +136,68 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     }
 
     // Marketplace Dica (always additive)
-    let marketplaceDica = '';
+    let marketplaceDicas = [];
     try {
-      marketplaceDica = await getMarketplaceDica({
+      const dicas = await getMarketplaceDica({
         message: incoming,
         city,
         context: memorySummary,
       });
+      if (Array.isArray(dicas)) {
+        marketplaceDicas = dicas.filter(Boolean); // Always array
+      } else if (typeof dicas === 'string' && dicas.trim()) {
+        marketplaceDicas = [dicas.trim()];
+      }
     } catch (e) {
       console.error('[Marketplace Dica] Error:', e);
-      marketplaceDica = '';
+      marketplaceDicas = [];
     }
 
-    // Compose WhatsApp message: always main + dica (never overwrites)
+    // Compose WhatsApp message: smart truncation with dicas
     let finalContent = mainAnswer && mainAnswer.trim();
-    if (marketplaceDica) {
-      finalContent += `\n\n${marketplaceDica}`;
-    } else {
-      // Always close with a general Dica (prompt-based, not hard-coded ideally)
-      finalContent += '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
+
+    // Marketplace Dica block (all dicas, always at the end)
+    let dicasBlock = '';
+    if (marketplaceDicas.length) {
+      // De-duplicate (based on first line, case-insensitive)
+      const seen = new Set();
+      dicasBlock = marketplaceDicas.filter(dica => {
+        const key = dica.split('\n')[0].toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).join('\n\n');
     }
-    finalContent = finalContent.trim();
 
-    // Run postprocess — this will add the [TRUNCATE_MARKER] if needed
-    let replyObj = replyHelper.generic(finalContent);
-    replyObj = postprocess(replyObj, incoming);
-
-    // Memory update
-    await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
-    try {
-      const profileDoc = db.collection('profiles').doc(waNumber);
-      const old = memorySummary || '';
-      memorySvc.updateUserSummary(old, incoming)
-        .then(summary => {
-          if (summary && summary !== old) {
-            profileDoc.set({ memory: summary }, { merge: true });
-          }
-        })
-        .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
-    } catch (e) { console.error('[MEMORY] Outer error:', e); }
-
-    // Handle truncation
     let safeContent = replyHelper.fallback().content;
     let truncateId = null;
-    let shortContent = replyObj.content;
 
-    if (typeof replyObj.content === 'string' && replyObj.content.trim()) {
-      // Look for marker inserted by postprocess
-      const markerIndex = replyObj.content.indexOf('[TRUNCATE_MARKER]');
-      if (markerIndex >= 0) {
-        shortContent = replyObj.content.slice(0, markerIndex).trim();
-        // Save full reply to Firestore for view link
-        const longContent = replyObj.content.replace('[TRUNCATE_MARKER]', '').trim();
+    if (typeof finalContent === 'string' && finalContent.trim()) {
+      // WhatsApp truncation logic with dicas and link
+      if ((finalContent.length + dicasBlock.length) > MAX_WHATSAPP_LEN) {
+        // Shorten main answer to first 2 sentences or ~400 chars, append dicas, then link
+        let summary = finalContent.split('.').slice(0, 2).join('.') + '.';
+        if (summary.length < 50) summary = finalContent.slice(0, 400) + '...';
+        // Save full reply to Firestore for /view link
         const docRef = await db.collection('longReplies').add({
           waNumber,
           question: incoming,
-          answer: longContent,
+          answer: finalContent + (dicasBlock ? '\n\n' + dicasBlock : ''),
           createdAt: new Date()
         });
         truncateId = docRef.id;
-        shortContent += `\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
+
+        safeContent = [
+          summary.trim(),
+          dicasBlock.trim(),
+          `👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`
+        ].filter(Boolean).join('\n\n');
+        safeContent = safeContent.slice(0, MAX_WHATSAPP_LEN - 20) + '\n...(resposta resumida)';
+      } else {
+        // Short answer: main + all dicas
+        safeContent = finalContent;
+        if (dicasBlock) safeContent += '\n\n' + dicasBlock;
       }
-      safeContent = truncateForWhatsapp(shortContent, 950);
     } else {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
@@ -217,6 +210,20 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     ) {
       safeContent = replyHelper.fallback().content;
     }
+
+    // Save memory (usage/tokens/etc)
+    await profileSvc.updateUsage(db, waNumber, 0);
+    try {
+      const profileDoc = db.collection('profiles').doc(waNumber);
+      const old = memorySummary || '';
+      memorySvc.updateUserSummary(old, incoming)
+        .then(summary => {
+          if (summary && summary !== old) {
+            profileDoc.set({ memory: summary }, { merge: true });
+          }
+        })
+        .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
+    } catch (e) { console.error('[MEMORY] Outer error:', e); }
 
     console.log(`[index.cjs] Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
     res.type('text/xml');
