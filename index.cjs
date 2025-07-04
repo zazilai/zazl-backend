@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, Smart Dicas + Truncation)
+// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, Smart Truncation, Dicas Always Present)
 
 require('dotenv').config();
 const express = require('express');
@@ -24,9 +24,12 @@ const db = admin.firestore();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
-const MAX_WHATSAPP_LEN = 950;
+function truncateForWhatsapp(msg, maxLen = 950) {
+  if (!msg) return '';
+  if (msg.length <= maxLen) return msg;
+  return msg.slice(0, maxLen - 20) + '\n...(resposta resumida)';
+}
 
-// Only real keywords: cancel, greeting (user experience)
 const isCancel = text =>
   /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(text) ||
   text.includes('cancelar zazil') || text.includes('cancelar plano') || text.includes('cancelar assinatura') ||
@@ -86,7 +89,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
     } catch (e) { city = ''; }
 
-    // Future-proof current detector (use as little keyword as possible)
+    // Current intent detector (keep as minimal as possible)
     const isCurrentQuestion = (text) =>
       /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data|evento|show|agenda)\b/i.test(text);
 
@@ -136,83 +139,61 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     }
 
     // Marketplace Dica (always additive)
-    let marketplaceDicas = [];
+    let marketplaceDica = '';
     try {
-      const dicas = await getMarketplaceDica({
+      marketplaceDica = await getMarketplaceDica({
         message: incoming,
         city,
         context: memorySummary,
       });
-      if (Array.isArray(dicas)) {
-        marketplaceDicas = dicas.filter(Boolean); // Always array
-      } else if (typeof dicas === 'string' && dicas.trim()) {
-        marketplaceDicas = [dicas.trim()];
-      }
     } catch (e) {
       console.error('[Marketplace Dica] Error:', e);
-      marketplaceDicas = [];
+      marketplaceDica = '';
     }
 
-    // Compose WhatsApp message: smart truncation with dicas
-    let finalContent = mainAnswer && mainAnswer.trim();
-
-    // Marketplace Dica block (all dicas, always at the end)
-    let dicasBlock = '';
-    if (marketplaceDicas.length) {
-      // De-duplicate (based on first line, case-insensitive)
-      const seen = new Set();
-      dicasBlock = marketplaceDicas.filter(dica => {
-        const key = dica.split('\n')[0].toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      }).join('\n\n');
-    }
-
-    let safeContent = replyHelper.fallback().content;
+    // -- Compose for WhatsApp (always add marketplace dica(s) if present) --
+    let finalContent = (mainAnswer && mainAnswer.trim()) || '';
+    let willTruncate = false;
+    let fullForWeb = '';
+    let safeContent = '';
     let truncateId = null;
 
-    if (typeof finalContent === 'string' && finalContent.trim()) {
-      // WhatsApp truncation logic with dicas and link
-      if ((finalContent.length + dicasBlock.length) > MAX_WHATSAPP_LEN) {
-        // Shorten main answer to first 2 sentences or ~400 chars, append dicas, then link
-        let summary = finalContent.split('.').slice(0, 2).join('.') + '.';
-        if (summary.length < 50) summary = finalContent.slice(0, 400) + '...';
-        // Save full reply to Firestore for /view link
-        const docRef = await db.collection('longReplies').add({
-          waNumber,
-          question: incoming,
-          answer: finalContent + (dicasBlock ? '\n\n' + dicasBlock : ''),
-          createdAt: new Date()
-        });
-        truncateId = docRef.id;
-
-        safeContent = [
-          summary.trim(),
-          dicasBlock.trim(),
-          `👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`
-        ].filter(Boolean).join('\n\n');
-        safeContent = safeContent.slice(0, MAX_WHATSAPP_LEN - 20) + '\n...(resposta resumida)';
-      } else {
-        // Short answer: main + all dicas
-        safeContent = finalContent;
-        if (dicasBlock) safeContent += '\n\n' + dicasBlock;
+    if (finalContent.length + (marketplaceDica ? marketplaceDica.length + 2 : 0) > 950) {
+      // Will be truncated: Save full for web, show link, and ALWAYS append marketplace dicas to WhatsApp message!
+      willTruncate = true;
+      fullForWeb = finalContent;
+      if (marketplaceDica) {
+        fullForWeb += `\n\n${marketplaceDica}`;
       }
+      // Save full answer to Firestore and build short message with Dicas included
+      const docRef = await db.collection('longReplies').add({
+        waNumber,
+        question: incoming,
+        answer: fullForWeb,
+        createdAt: new Date()
+      });
+      truncateId = docRef.id;
+      // Compose WhatsApp reply: short intro + link + Dica(s)
+      let shortContent = truncateForWhatsapp(finalContent, 750); // Allow room for link + dica(s)
+      shortContent += `\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
+      if (marketplaceDica) {
+        shortContent += `\n\n${marketplaceDica}`;
+      }
+      safeContent = shortContent.trim();
     } else {
-      console.warn('[Zazil] No replyObj or content found — using fallback.');
+      // Not truncated, just append as normal
+      if (marketplaceDica) {
+        finalContent += `\n\n${marketplaceDica}`;
+      }
+      safeContent = finalContent.trim();
     }
 
-    // Final check: too short, broken, fallback
-    if (
-      safeContent.length < 80 ||
-      /^1\.\s*$/.test(safeContent.trim()) ||
-      safeContent.startsWith('Dica do Zazil')
-    ) {
-      safeContent = replyHelper.fallback().content;
-    }
+    // Post-process and safety
+    let replyObj = replyHelper.generic(safeContent);
+    replyObj = postprocess(replyObj, incoming);
 
-    // Save memory (usage/tokens/etc)
-    await profileSvc.updateUsage(db, waNumber, 0);
+    // Memory update
+    await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
     try {
       const profileDoc = db.collection('profiles').doc(waNumber);
       const old = memorySummary || '';
@@ -225,9 +206,19 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
     } catch (e) { console.error('[MEMORY] Outer error:', e); }
 
-    console.log(`[index.cjs] Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
+    // Final check: too short, broken, fallback
+    if (
+      !replyObj.content ||
+      replyObj.content.length < 80 ||
+      /^1\.\s*$/.test(replyObj.content.trim()) ||
+      replyObj.content.startsWith('Dica do Zazil')
+    ) {
+      replyObj.content = replyHelper.fallback().content;
+    }
+
+    console.log(`[index.cjs] Outgoing reply length: ${replyObj.content.length} | Used model: ${usedModel}`);
     res.type('text/xml');
-    res.send(`<Response><Message>${safeContent}</Message></Response>`);
+    res.send(`<Response><Message>${replyObj.content}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
     if (
