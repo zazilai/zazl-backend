@@ -1,32 +1,34 @@
-// helpers/profile.js
+// helpers/profile.js — Zazil, 2025 (Great Product: All-in-one for Profile, Plan, Alerts, Memory)
 
 const { admin } = require('./firebase');
 const db = admin.firestore();
 
-// Loads user profile or creates it if new; tracks trial status.
+// ---- 1. PROFILE LOAD & PLAN/TRIAL LOGIC ----
+
 async function load(db, waNumber) {
   const doc = db.collection('profiles').doc(waNumber);
   let wasNew = false;
   const snap = await doc.get();
   if (!snap.exists) {
-    const now = admin.firestore.Timestamp.now();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
     await doc.set({
       plan: 'trial',
       usage: {},
       createdAt: now,
       updatedAt: now,
       trialStart: now,
-      planExpires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 dias
+      planExpires: new Date(Date.now() + sevenDays),
+      memory: '',
+      city: '',
+      alerts: []
     });
     wasNew = true;
-  } else if (!snap.data().planExpires && snap.data().plan === 'trial') {
-    // Trial profile antigo: adiciona planExpires retroativamente
-    const start = snap.data().createdAt?.toDate?.() || new Date();
-    const expires = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-    await doc.set({ planExpires: expires }, { merge: true });
   }
   return { wasNew };
 }
+
+// ---- 2. USAGE / QUOTA MANAGEMENT ----
 
 async function getQuotaStatus(db, waNumber) {
   const doc = db.collection('profiles').doc(waNumber);
@@ -37,11 +39,9 @@ async function getQuotaStatus(db, waNumber) {
   const data = snap.data();
   let plan = data.plan || 'trial';
   let used = (data.usage && data.usage[getToday()]) || 0;
-  let limit = plan === 'pro' ? 99999 : 15;
-  if (plan === 'free') limit = 10;
-  if (plan === 'trial') limit = 15;
+  let limit = plan === 'pro' ? 99999 : (plan === 'free' ? 10 : 15);
 
-  // [TRIAL ENFORCEMENT]
+  // Enforce trial expiration
   if (plan === 'trial') {
     let expiresAt;
     if (data.planExpires) {
@@ -50,13 +50,7 @@ async function getQuotaStatus(db, waNumber) {
         : new Date(data.planExpires).getTime();
     }
     if (expiresAt && Date.now() > expiresAt) {
-      return {
-        allowed: false,
-        plan,
-        used,
-        limit,
-        reason: 'trial_expired'
-      };
+      return { allowed: false, plan, used, limit, reason: 'trial_expired' };
     }
   }
 
@@ -89,10 +83,23 @@ function getToday() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// ---- ALERT / OPT-IN / OPT-OUT LOGIC ----
+// ---- 3. MEMORY & CITY MANAGEMENT ----
+
+// (No extra functions needed here—handled via profile fields, updated in your main flow.)
+// Use: db.collection('profiles').doc(waNumber).set({ memory, city }, { merge: true });
+
+async function setMemory(db, waNumber, memory) {
+  await db.collection('profiles').doc(waNumber).set({ memory }, { merge: true });
+}
+
+async function setCity(db, waNumber, city) {
+  await db.collection('profiles').doc(waNumber).set({ city }, { merge: true });
+}
+
+// ---- 4. ALERTS / EVENT NOTIFICATIONS ----
 
 async function setPendingAlertOptIn(db, waNumber, city) {
-  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min from now
+  const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min
   await db.collection('profiles').doc(waNumber).set({
     pendingAlertOptIn: { city, expiresAt }
   }, { merge: true });
@@ -130,7 +137,9 @@ async function removeAlert(db, waNumber, city) {
   const docRef = db.collection('profiles').doc(waNumber);
   const doc = await docRef.get();
   const data = doc.exists ? doc.data() : {};
-  const alerts = Array.isArray(data.alerts) ? data.alerts.filter(a => a.city?.toLowerCase() !== city?.toLowerCase()) : [];
+  const alerts = Array.isArray(data.alerts)
+    ? data.alerts.filter(a => a.city?.toLowerCase() !== city?.toLowerCase())
+    : [];
   await docRef.set({ alerts }, { merge: true });
 }
 
@@ -150,6 +159,8 @@ module.exports = {
   load,
   getQuotaStatus,
   updateUsage,
+  setMemory,
+  setCity,
   setPendingAlertOptIn,
   getPendingAlertOptIn,
   clearPendingAlertOptIn,
