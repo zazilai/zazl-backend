@@ -1,4 +1,4 @@
-// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, No Keyword Hacks)
+// index.cjs — Zazil (Marketplace-Orchestrated, GPT-4o, Future-Proof, No Keyword Hacks, Smart Truncation)
 
 require('dotenv').config();
 const express = require('express');
@@ -27,14 +27,6 @@ const app = express();
 function truncateForWhatsapp(msg, maxLen = 950) {
   if (!msg) return '';
   if (msg.length <= maxLen) return msg;
-  const dicaSplit = msg.toLowerCase().indexOf('dica do zazil');
-  if (dicaSplit > 0) {
-    const mainShort = msg.slice(0, dicaSplit).split('.').slice(0, 2).join('.') + '.\n';
-    const dica = msg.slice(dicaSplit, dicaSplit + 300);
-    let output = mainShort + dica;
-    if (output.length > maxLen) output = output.slice(0, maxLen - 20) + '\n...(resposta resumida)';
-    return output;
-  }
   return msg.slice(0, maxLen - 20) + '\n...(resposta resumida)';
 }
 
@@ -45,6 +37,9 @@ const isCancel = text =>
   text.includes('cancel my plan') || text.includes('cancel subscription');
 
 const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
+
+// Smart truncation marker for postprocess
+const TRUNCATE_MARKER = '[TRUNCATE_MARKER]';
 
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -170,12 +165,12 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     }
     finalContent = finalContent.trim();
 
+    // Run postprocess — this will add the [TRUNCATE_MARKER] if needed
     let replyObj = replyHelper.generic(finalContent);
     replyObj = postprocess(replyObj, incoming);
 
     // Memory update
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
-    // Optionally update memory only for longer chats
     try {
       const profileDoc = db.collection('profiles').doc(waNumber);
       const old = memorySummary || '';
@@ -188,10 +183,28 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
     } catch (e) { console.error('[MEMORY] Outer error:', e); }
 
-    // Truncate for WhatsApp, robust fallback
+    // Handle truncation
     let safeContent = replyHelper.fallback().content;
-    if (replyObj && typeof replyObj.content === 'string' && replyObj.content.trim()) {
-      safeContent = truncateForWhatsapp(replyObj.content, 950);
+    let truncateId = null;
+    let shortContent = replyObj.content;
+
+    if (typeof replyObj.content === 'string' && replyObj.content.trim()) {
+      // Look for marker inserted by postprocess
+      const markerIndex = replyObj.content.indexOf('[TRUNCATE_MARKER]');
+      if (markerIndex >= 0) {
+        shortContent = replyObj.content.slice(0, markerIndex).trim();
+        // Save full reply to Firestore for view link
+        const longContent = replyObj.content.replace('[TRUNCATE_MARKER]', '').trim();
+        const docRef = await db.collection('longReplies').add({
+          waNumber,
+          question: incoming,
+          answer: longContent,
+          createdAt: new Date()
+        });
+        truncateId = docRef.id;
+        shortContent += `\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
+      }
+      safeContent = truncateForWhatsapp(shortContent, 950);
     } else {
       console.warn('[Zazil] No replyObj or content found — using fallback.');
     }
