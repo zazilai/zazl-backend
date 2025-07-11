@@ -1,4 +1,4 @@
-// index.cjs — Zazil 2025 MVP: Always AI Answer + Brazilian Layer (Marketplace Dica), Bulletproof Truncation & Logs
+// index.cjs — Zazil 2025: RAG Memory, Model-Driven, Reliable Events (July 2025)
 
 require('dotenv').config();
 const express = require('express');
@@ -27,16 +27,11 @@ const app = express();
 function truncateForWhatsapp(msg, maxLen = 950) {
   if (!msg) return '';
   if (msg.length <= maxLen) return msg;
-  // Avoid breaking Markdown; preserve first 700 chars, then a marker, then Dicas (if any).
   return msg.slice(0, maxLen - 40).trim() + '\n...(resposta resumida)';
 }
 
-// Only real keywords: cancel, greeting (user experience)
-const isCancel = text =>
-  /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(text) ||
-  text.includes('cancelar zazil') || text.includes('cancelar plano') || text.includes('cancelar assinatura') ||
-  text.includes('cancel my plan') || text.includes('cancel subscription');
-
+// Handlers
+const isCancel = text => /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/i.test(text);
 const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
 
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
@@ -45,7 +40,7 @@ app.use(bodyParser.json());
 app.use(checkoutRoute);
 app.use(manageRoute);
 app.use(viewRoute);
-app.get('/', (req, res) => res.send('✅ Zazil backend up'));
+app.get('/', (req, res) => res.send('✅ Zazil backend up (July 2025)'));
 
 app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incoming = (req.body.Body || '').trim();
@@ -53,136 +48,88 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
   const incomingLower = incoming.toLowerCase();
 
   try {
-    // Onboard if new
     const { wasNew } = await profileSvc.load(db, waNumber);
     if (wasNew) {
       const welcomeMsg = replyHelper.welcome(waNumber);
-      res.type('text/xml');
-      return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
-    // Quota check
     const quota = await profileSvc.getQuotaStatus(db, waNumber);
     if (!quota.allowed) {
       const upgradeMsg = replyHelper.upgrade(waNumber);
-      res.type('text/xml');
-      return res.send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${upgradeMsg.content}</Message></Response>`);
     }
 
-    // CANCEL (user experience only!)
     if (isCancel(incomingLower)) {
       const cancelMsg = replyHelper.cancel(waNumber);
-      res.type('text/xml');
-      return res.send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${cancelMsg.content}</Message></Response>`);
     }
 
-    // GREETING
     if (greetingRegex.test(incoming)) {
       const greetReply = replyHelper.greeting();
-      res.type('text/xml');
-      return res.send(`<Response><Message>${greetReply}</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${greetReply}</Message></Response>`);
     }
 
-    // Load personalization
-    let profileDoc, memorySummary = '', city = '';
-    try {
-      profileDoc = await db.collection('profiles').doc(waNumber).get();
-      memorySummary = profileDoc.exists ? (profileDoc.data().memory || '') : '';
-      city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
-    } catch (e) { city = ''; }
+    // Load with RAG memory
+    const profileDoc = await db.collection('profiles').doc(waNumber).get();
+    const memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
+    let city = profileDoc.data()?.city || '';
 
-    // Future-proof current detector (use as little keyword as possible)
-    const isCurrentQuestion = (text) =>
-      /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data|evento|show|agenda)\b/i.test(text);
+    const enhancedPrompt = ZAZIL_PROMPT + `\nContexto do usuário: ${memoryContext || 'Nenhum contexto salvo.'}`;
 
-    // MAIN ANSWER: Perplexity for current/event/news, GPT-4o for everything else
+    // Model-driven intent for query type
+    const intentRes = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      max_tokens: 20,
+      messages: [{ role: 'system', content: 'Classifique: CURRENT (news/events/now), AMAZON, EVENT, FX, SERVICE_COST, ou GENERIC.' },
+                { role: 'user', content: incoming }]
+    });
+    const intent = intentRes.choices[0].message.content.trim();
+
     let mainAnswer = '';
     let usedModel = '';
-    const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : 'EUA';
+    const cityForPrompt = city || 'EUA';
 
-    try {
-      if (isCurrentQuestion(incoming)) {
-        // Perplexity is always first for news/events/current
-        const { answer } = await perplexityService.search(incoming, cityForPrompt);
-        mainAnswer = answer || '';
-        usedModel = 'Perplexity';
-        if (!mainAnswer || mainAnswer.length < 30) {
-          // Fallback: GPT-4o
-          const gpt = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            temperature: 0.3,
-            max_tokens: 2048,
-            messages: [
-              { role: 'system', content: ZAZIL_PROMPT },
-              { role: 'user', content: incoming }
-            ]
-          });
-          mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
-          usedModel = 'GPT-4o (fallback)';
-        }
-      } else {
-        // Everything else: GPT-4o
-        const gpt = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          temperature: 0.3,
-          max_tokens: 2048,
-          messages: [
-            { role: 'system', content: ZAZIL_PROMPT },
-            { role: 'user', content: incoming + (cityForPrompt && !incoming.toLowerCase().includes(cityForPrompt.toLowerCase()) ? ` em ${cityForPrompt}` : '') }
-          ]
-        });
-        mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
-        usedModel = 'GPT-4o';
-      }
-      console.log(`[AI] Answer generated by: ${usedModel}`);
-    } catch (err) {
-      console.error('[AI ERROR]', err);
-      mainAnswer = "Desculpe, não consegui responder sua pergunta agora.";
+    if (intent === 'CURRENT') {
+      const { answer } = await perplexityService.search(incoming, cityForPrompt);
+      mainAnswer = answer || '';
+      usedModel = 'Perplexity';
     }
 
-    // Marketplace Dica (Brazilian Layer)
-    let marketplaceDica = '';
-    try {
-      marketplaceDica = await getMarketplaceDica({
-        message: incoming,
-        city,
-        context: memorySummary,
+    if (!mainAnswer || mainAnswer.length < 50) {
+      const gpt = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        temperature: 0.3,
+        max_tokens: 2048,
+        messages: [
+          { role: 'system', content: enhancedPrompt },
+          { role: 'user', content: incoming + (cityForPrompt ? ` em ${cityForPrompt}` : '') }
+        ]
       });
-      if (marketplaceDica && typeof marketplaceDica !== 'string') {
-        marketplaceDica = String(marketplaceDica);
-      }
-    } catch (e) {
-      console.error('[Marketplace Dica] Error:', e);
-      marketplaceDica = '';
+      mainAnswer = gpt.choices?.[0]?.message?.content || 'Desculpe, não consegui responder agora.';
+      usedModel = 'GPT-4o';
     }
 
-    // Always append the Marketplace Dica (Brazilian Layer) if found; otherwise fallback
-    let dicasBlock = '';
-    if (marketplaceDica && marketplaceDica.trim().length > 3) {
-      dicasBlock = `\n\n${marketplaceDica.trim()}`;
-    } else {
-      dicasBlock = '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
-    }
+    // Single Dica
+    const marketplaceDica = await getMarketplaceDica({ message: incoming, city: cityForPrompt, context: memoryContext, intent });
 
-    // Compose full message for truncation handling
-    let fullContent = (mainAnswer || '').trim() + dicasBlock;
+    let fullContent = mainAnswer.trim();
+    if (marketplaceDica) fullContent += `\n\n${marketplaceDica.trim()}`;
 
-    // LOGS: For debugging
     console.log('---- [DEBUG ZAZIL] ----');
     console.log('User:', waNumber);
     console.log('Q:', incoming);
-    console.log('Main:', mainAnswer?.slice(0, 120));
-    console.log('Dica:', dicasBlock?.slice(0, 120));
-    console.log('Full (len):', fullContent.length);
+    console.log('Memory:', memoryContext);
+    console.log('Intent:', intent);
+    console.log('Main:', mainAnswer.slice(0, 120));
+    console.log('Dica:', marketplaceDica?.slice(0, 120) || 'None');
+    console.log('Full Len:', fullContent.length);
 
-    // Truncation logic: If too long, show truncated + full link
-    let safeContent = '';
+    let safeContent = fullContent.length <= 950 ? fullContent : '';
     let truncateId = null;
-    if (fullContent.length <= 950) {
-      safeContent = fullContent;
-    } else {
-      // Save the full version to Firestore, send the truncated with link
-      const short = truncateForWhatsapp(fullContent, 850);
+    if (fullContent.length > 950) {
+      const short = truncateForWhatsapp(fullContent);
       const docRef = await db.collection('longReplies').add({
         waNumber,
         question: incoming,
@@ -190,53 +137,29 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         createdAt: new Date()
       });
       truncateId = docRef.id;
-      safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
+      safeContent = `${short}\n\n👉 Leia completo: https://zazl-backend.onrender.com/view/${truncateId}`;
     }
 
-    // Run postprocess (if needed)
     let replyObj = replyHelper.generic(safeContent);
     replyObj = postprocess(replyObj, incoming);
 
-    // Memory update
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
-    try {
-      const profileDoc = db.collection('profiles').doc(waNumber);
-      const old = memorySummary || '';
-      memorySvc.updateUserSummary(old, incoming)
-        .then(summary => {
-          if (summary && summary !== old) {
-            profileDoc.set({ memory: summary }, { merge: true });
-          }
-        })
-        .catch(err => { console.error('[MEMORY] Error in updateUserSummary:', err); });
-    } catch (e) { console.error('[MEMORY] Outer error:', e); }
 
-    // Final check: too short, broken, fallback
-    if (
-      !safeContent ||
-      safeContent.length < 80 ||
-      /^1\.\s*$/.test(safeContent.trim()) ||
-      safeContent.startsWith('Dica do Zazil')
-    ) {
-      safeContent = replyHelper.fallback().content;
+    const oldSummary = profileDoc.data()?.memory || '';
+    const newSummary = await memorySvc.updateUserSummary(waNumber, oldSummary, incoming);
+    if (newSummary !== oldSummary) {
+      await db.collection('profiles').doc(waNumber).set({ memory: newSummary }, { merge: true });
     }
 
-    console.log(`[index.cjs] Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
-    res.type('text/xml');
-    res.send(`<Response><Message>${safeContent}</Message></Response>`);
+    if (!safeContent || safeContent.length < 80) safeContent = replyHelper.fallback().content;
+
+    console.log(`[index.cjs] Outgoing len: ${safeContent.length} | Model: ${usedModel}`);
+    res.type('text/xml').send(`<Response><Message>${safeContent}</Message></Response>`);
   } catch (err) {
     console.error('[twilio-whatsapp] error:', err);
-    if (
-      (err.message && err.message.match(/firestore|firebase|unavailable|timeout|network/i)) ||
-      (err.code && err.code.toString().includes('unavailable'))
-    ) {
-      res.type('text/xml');
-      return res.send(`<Response><Message>${replyHelper.fallbackOutage().content}</Message></Response>`);
-    }
-    res.type('text/xml');
-    res.send(`<Response><Message>${replyHelper.fallback().content}</Message></Response>`);
+    res.type('text/xml').send(`<Response><Message>${replyHelper.fallback().content}</Message></Response>`);
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Zazil backend listening on ${PORT} (July 2025)`));
