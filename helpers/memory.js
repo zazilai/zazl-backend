@@ -1,4 +1,4 @@
-// helpers/memory.js — Enhanced with Simple RAG for Better Recall (July 2025)
+// helpers/memory.js — Enhanced with RAG, Feedback, Follow-Up Detection (July 2025)
 
 const { OpenAI } = require('openai');
 const { admin } = require('./firebase');
@@ -18,6 +18,7 @@ function cosineSimilarity(vecA, vecB) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// System prompt for personal data filtering
 const systemPrompt = `
 Você é um assistente de IA que mantém APENAS dados PESSOAIS e PERMANENTES do usuário (nome, cidade, profissão, interesses fixos, datas especiais). NÃO registre buscas, compras, perguntas ou interesses momentâneos (ex: eventos, produtos, notícias).
 Filtre rigorosamente: Se a mensagem NÃO contiver info pessoal nova, retorne o resumo anterior inalterado.
@@ -27,13 +28,50 @@ Resumo atual: Pedro mora em Austin.
 Nova mensagem: Sou engenheiro, aniversário em 10/10.
 Resumo atualizado: Pedro mora em Austin. Profissão: engenheiro. Aniversário: 10/10.
 
-Se nada novo: Retorne exatamente o resumo atual.
+Se nada novo ou mensagem curta como "sim" ou "nao", retorne exatamente o resumo atual.
 `;
 
+// Detect feedback or follow-up intent
+async function detectIntent(message) {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      max_tokens: 20,
+      messages: [
+        {
+          role: 'system',
+          content: 'Classifique a mensagem como: "feedback" (ex: sim/nao), "follow-up" (resposta curta a pergunta anterior), ou "none". Retorne apenas: type:feedback|follow-up|none.'
+        },
+        { role: 'user', content: message }
+      ]
+    });
+    const content = response.choices?.[0]?.message?.content?.trim() || 'type:none';
+    return content.split(':')[1] || 'none';
+  } catch (err) {
+    console.error('[MEMORY] Intent detection error:', err);
+    return 'none';
+  }
+}
+
+// Update user summary with strict personal data filter
 async function updateUserSummary(waNumber, oldSummary, userMessage) {
   try {
-    // Strict filter: Skip if no personal keywords
-    if (!/\b(eu|meu|minha|sou|moro|morar|aniversário|profissão|trabalho|interesse|data|nome|cidade|país)\b/i.test(userMessage)) {
+    // Detect intent first
+    const intent = await detectIntent(userMessage);
+    if (intent === 'feedback') {
+      // Log feedback to Firestore
+      await db.collection('feedback').add({
+        waNumber,
+        query: userMessage,
+        rating: userMessage.toLowerCase().includes('sim') ? 'positive' : 'negative',
+        timestamp: new Date()
+      });
+      return oldSummary || '';
+    }
+
+    // Skip if follow-up or non-personal (AI-driven filter)
+    if (intent === 'follow-up' || !/\b(eu|meu|minha|sou|moro|morar|aniversário|profissão|trabalho|interesse|data|nome|cidade|país)\b/i.test(userMessage)) {
       return oldSummary || '';
     }
 

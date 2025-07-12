@@ -27,7 +27,6 @@ const app = express();
 function truncateForWhatsapp(msg, maxLen = 950) {
   if (!msg) return '';
   if (msg.length <= maxLen) return msg;
-  // Avoid breaking Markdown; preserve first 700 chars, then a marker, then Dicas (if any).
   return msg.slice(0, maxLen - 40).trim() + '\n...(resposta resumida)';
 }
 
@@ -91,37 +90,52 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
     } catch (e) { city = ''; }
 
-    // Future-proof current detector (use as little keyword as possible)
+    // Detect intent and handle follow-ups
+    let intent = 'none';
+    let previousQuery = '';
+    try {
+      const memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
+      if (memoryContext) {
+        const [lastQuery] = memoryContext.split(' | ').filter(q => q.includes('asked')).pop() || '';
+        if (lastQuery) previousQuery = lastQuery.replace(/asked: /, '');
+      }
+      const intentRes = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        max_tokens: 20,
+        messages: [
+          { role: 'system', content: 'Classifique a intenção como: "event", "current", "shopping", "feedback", "follow-up", ou "none".' },
+          { role: 'user', content: incoming + (previousQuery ? ` (contexto anterior: ${previousQuery})` : '') }
+        ]
+      });
+      intent = intentRes.choices?.[0]?.message?.content?.trim().split(':')[1] || 'none';
+    } catch (e) { console.error('[INTENT] Error:', e); intent = 'none'; }
+
+    // Future-proof current detector
     const isCurrentQuestion = (text) =>
       /\b(hoje|amanhã|agora|notícia|noticias|aconteceu|última hora|breaking|resultados?|placar|previsão|cotação|tempo|clima|trânsito|transito|weekend|semana|month|today|now|current|update|data|evento|show|agenda)\b/i.test(text);
 
-    // MAIN ANSWER: Perplexity for current/event/news, GPT-4o for everything else
+    // MAIN ANSWER: Model selection based on intent
     let mainAnswer = '';
     let usedModel = '';
-    const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : 'EUA';
+    const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : (intent === 'event' && !city ? 'por favor, me diga sua cidade' : 'EUA');
 
     try {
-      if (isCurrentQuestion(incoming)) {
-        // Perplexity is always first for news/events/current
+      if (intent === 'current' || isCurrentQuestion(incoming)) {
         const { answer } = await perplexityService.search(incoming, cityForPrompt);
         mainAnswer = answer || '';
         usedModel = 'Perplexity';
         if (!mainAnswer || mainAnswer.length < 30) {
-          // Fallback: GPT-4o
           const gpt = await openai.chat.completions.create({
             model: 'gpt-4o',
             temperature: 0.3,
             max_tokens: 2048,
-            messages: [
-              { role: 'system', content: ZAZIL_PROMPT },
-              { role: 'user', content: incoming }
-            ]
+            messages: [{ role: 'system', content: ZAZIL_PROMPT }, { role: 'user', content: incoming }]
           });
           mainAnswer = gpt.choices?.[0]?.message?.content || "Desculpe, não consegui responder sua pergunta agora.";
           usedModel = 'GPT-4o (fallback)';
         }
       } else {
-        // Everything else: GPT-4o
         const gpt = await openai.chat.completions.create({
           model: 'gpt-4o',
           temperature: 0.3,
@@ -138,6 +152,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     } catch (err) {
       console.error('[AI ERROR]', err);
       mainAnswer = "Desculpe, não consegui responder sua pergunta agora.";
+    }
+
+    // Handle follow-ups or incomplete questions
+    if (intent === 'follow-up' && previousQuery) {
+      mainAnswer = `${mainAnswer} (continuação de: ${previousQuery})`;
     }
 
     // Marketplace Dica (Brazilian Layer)
@@ -167,10 +186,11 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     // Compose full message for truncation handling
     let fullContent = (mainAnswer || '').trim() + dicasBlock;
 
-    // LOGS: For debugging
+    // LOGS: For debugging (include intent)
     console.log('---- [DEBUG ZAZIL] ----');
     console.log('User:', waNumber);
     console.log('Q:', incoming);
+    console.log('Intent:', intent);
     console.log('Main:', mainAnswer?.slice(0, 120));
     console.log('Dica:', dicasBlock?.slice(0, 120));
     console.log('Full (len):', fullContent.length);
@@ -181,7 +201,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     if (fullContent.length <= 950) {
       safeContent = fullContent;
     } else {
-      // Save the full version to Firestore, send the truncated with link
       const short = truncateForWhatsapp(fullContent, 850);
       const docRef = await db.collection('longReplies').add({
         waNumber,
@@ -202,7 +221,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     try {
       const profileDoc = db.collection('profiles').doc(waNumber);
       const old = memorySummary || '';
-      memorySvc.updateUserSummary(old, incoming)
+      memorySvc.updateUserSummary(waNumber, old, incoming)
         .then(summary => {
           if (summary && summary !== old) {
             profileDoc.set({ memory: summary }, { merge: true });
