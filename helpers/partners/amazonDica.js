@@ -1,4 +1,4 @@
-// helpers/partners/amazonDica.js — Zazil 2025, GPT-4o keyword, fallback, debug
+// helpers/partners/amazonDica.js — Model-Driven Intent, No Hard-Coded Words (July 2025)
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -23,29 +23,35 @@ function getSignatureKey(key, dateStamp, regionName, serviceName) {
   return kSigning;
 }
 
-// STEP 1: Extract product keyword using GPT-4o
-async function extractKeywords(query) {
+// STEP 1: Model-driven intent detection + keyword extraction
+async function detectAndExtractKeywords(message, city) {
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       temperature: 0.2,
-      max_tokens: 12,
+      max_tokens: 30,
       messages: [
         {
           role: 'system',
-          content: 'Extraia apenas o termo de busca ideal para encontrar um produto físico na Amazon nos EUA a partir da pergunta do usuário. Só o termo, sem explicação ou detalhes.'
+          content: 'Primeiro, classifique se a mensagem é sobre comprar um produto (shopping intent): "sim" ou "não". Se sim, extraia o termo de busca ideal para Amazon nos EUA, incluindo cidade se relevante. Retorne apenas: intent:sim|não; keywords:termo.'
         },
-        { role: 'user', content: query }
+        { role: 'user', content: message + (city ? ` (usuário em ${city})` : '') }
       ]
     });
-    return response.choices?.[0]?.message?.content?.trim() || query;
+    const content = response.choices?.[0]?.message?.content?.trim() || '';
+    const intentMatch = content.match(/intent:(sim|n.o)/i);
+    const keywordsMatch = content.match(/keywords:(.+)/i);
+    if (intentMatch?.[1].toLowerCase() === 'sim' && keywordsMatch?.[1]) {
+      return keywordsMatch[1].trim();
+    }
+    return null;
   } catch (err) {
-    console.error('[AmazonDica extractKeywords] error:', err);
-    return query;
+    console.error('[AmazonDica detect] error:', err);
+    return null;
   }
 }
 
-// STEP 2: Call Amazon PA API
+// STEP 2: Call Amazon PA API (unchanged)
 async function searchAmazonProducts(keywords) {
   const region = 'us-east-1';
   const service = 'ProductAdvertisingAPI';
@@ -117,24 +123,18 @@ async function searchAmazonProducts(keywords) {
   }
 }
 
-// STEP 3: Main orchestrator — only for "shopping" messages!
+// Main: Model-driven, no hard-coded words
 module.exports = async function amazonDica(message, city, context, intent) {
-  // Use a very safe/strict check for shopping (no generic "onde/quanto/etc.")
-  const shoppingWords = /\b(comprar|produto|preço|quanto custa|amazon|loja|raquete|mochila|fone|laptop|iphone|camisa|tenis|sapato|tv|mala|relogio|câmera|bicicleta|tablet|headphone)\b/i;
-  if (!(intent === 'AMAZON' || shoppingWords.test(message))) return [];
+  const keywords = await detectAndExtractKeywords(message, city);
+  if (!keywords) return []; // No shopping intent detected by AI
 
   if (!accessKey || !secretKey || !partnerTag) {
     console.error('[amazonDica] Amazon env not set');
     return [];
   }
 
-  // Step 1: Extract shopping keyword using GPT-4o
-  const keywords = await extractKeywords(message);
-
-  // Step 2: Call Amazon PA API
   const items = await searchAmazonProducts(keywords);
 
-  // If API failed or no results, fallback to Perplexity
   if (!items.length) {
     const { answer } = await perplexityService.search(message + " Amazon EUA");
     if (answer) {
@@ -144,6 +144,5 @@ module.exports = async function amazonDica(message, city, context, intent) {
     }
   }
 
-  // Step 3: Return top (one) product
   return [replyHelper.amazon([items[0]]).content];
 };
