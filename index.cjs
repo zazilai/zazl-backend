@@ -2,9 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { admin } = require('./helpers/firebase');
-
-// XAI: Use @ai-sdk/xai Grok 4 client
-const { OpenAI } = require('@ai-sdk/xai');
+const { createClient } = require('@ai-sdk/xai'); // Correct XAI import
 
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
@@ -21,8 +19,7 @@ const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 
 const db = admin.firestore();
-// XAI Grok client (do not use OpenAI API key)
-const grok = new OpenAI({ apiKey: process.env.XAI_API_KEY });
+const grok = createClient({ apiKey: process.env.XAI_API_KEY }); // Correct Grok client for XAI
 const app = express();
 
 function truncateForWhatsapp(msg, maxLen = 950) {
@@ -119,16 +116,18 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     try {
       // Try Grok (xAI) first, timeout after 5s
+      const grokPromise = grok.chat.completions.create({
+        model: 'grok-4',
+        temperature: 0.3,
+        max_tokens: 2048,
+        messages: [
+          { role: 'system', content: ZAZIL_PROMPT },
+          { role: 'user', content: incoming + (cityForPrompt && !incoming.toLowerCase().includes(cityForPrompt.toLowerCase()) ? ` em ${cityForPrompt}` : '') }
+        ]
+      }).then(r => r.choices[0].message.content || null);
+
       const grokAnswer = await Promise.race([
-        grok.chat.completions.create({
-          model: 'grok-4',
-          temperature: 0.3,
-          max_tokens: 2048,
-          messages: [
-            { role: 'system', content: ZAZIL_PROMPT },
-            { role: 'user', content: incoming + (cityForPrompt && !incoming.toLowerCase().includes(cityForPrompt.toLowerCase()) ? ` em ${cityForPrompt}` : '') }
-          ]
-        }).then(r => r.choices[0].message.content || null),
+        grokPromise,
         new Promise(resolve => setTimeout(() => resolve(null), 5000))
       ]);
 
