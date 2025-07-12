@@ -27,17 +27,7 @@ const app = express();
 function truncateForWhatsapp(msg, maxLen = 950) {
   if (!msg) return '';
   if (msg.length <= maxLen) return msg;
-  // Improved: Prioritize keeping Dica intact by cutting main answer first
-  const dicaIndex = msg.lastIndexOf('\n\nDica do Zazil:');
-  if (dicaIndex > 0) {
-    const dica = msg.slice(dicaIndex);
-    const main = msg.slice(0, dicaIndex);
-    const mainCutoff = maxLen - dica.length - 50;
-    let mainSlice = main.slice(0, mainCutoff);
-    const lastPeriod = mainSlice.lastIndexOf('.');
-    if (lastPeriod > mainCutoff / 2) mainSlice = mainSlice.slice(0, lastPeriod + 1);
-    return mainSlice.trim() + '\n...(resposta resumida)' + dica;
-  }
+  // Avoid breaking Markdown; preserve first 700 chars, then a marker, then Dicas (if any).
   return msg.slice(0, maxLen - 40).trim() + '\n...(resposta resumida)';
 }
 
@@ -68,7 +58,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     if (wasNew) {
       const welcomeMsg = replyHelper.welcome(waNumber);
       res.type('text/xml');
-      return res.send(`<Response><Message>${welcomeMsg.content}\n\nFoi útil? Responda 'sim' ou 'não' para ajudar a melhorar!</Message></Response>`); // Added feedback
+      return res.send(`<Response><Message>${welcomeMsg.content}</Message></Response>`);
     }
 
     // Quota check
@@ -189,7 +179,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
     let safeContent = '';
     let truncateId = null;
     if (fullContent.length <= 950) {
-      safeContent = fullContent + '\n\nFoi útil? Responda "sim" ou "não" para ajudar a melhorar!'; // Added feedback
+      safeContent = fullContent;
     } else {
       // Save the full version to Firestore, send the truncated with link
       const short = truncateForWhatsapp(fullContent, 850);
@@ -200,7 +190,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         createdAt: new Date()
       });
       truncateId = docRef.id;
-      safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}\n\nFoi útil? Responda "sim" ou "não" para ajudar a melhorar!`; // Added feedback
+      safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
     }
 
     // Run postprocess (if needed)
@@ -228,7 +218,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       /^1\.\s*$/.test(safeContent.trim()) ||
       safeContent.startsWith('Dica do Zazil')
     ) {
-      safeContent = replyHelper.fallback().content + '\n\nFoi útil? Responda "sim" ou "não" para ajudar a melhorar!'; // Added feedback
+      safeContent = replyHelper.fallback().content;
     }
 
     console.log(`[index.cjs] Outgoing reply length: ${safeContent.length} | Used model: ${usedModel}`);
