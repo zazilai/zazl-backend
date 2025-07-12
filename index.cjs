@@ -1,10 +1,10 @@
-// index.cjs — Zazil 2025: Grok 4 Primary with Perplexity First Fallback (July 2025)
-
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { admin } = require('./helpers/firebase');
-const { OpenAI } = require('openai');
+
+// XAI: Use @ai-sdk/xai Grok 4 client
+const { OpenAI } = require('@ai-sdk/xai');
 
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
@@ -21,7 +21,8 @@ const manageRoute = require('./routes/manage');
 const viewRoute = require('./routes/view');
 
 const db = admin.firestore();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// XAI Grok client (do not use OpenAI API key)
+const grok = new OpenAI({ apiKey: process.env.XAI_API_KEY });
 const app = express();
 
 function truncateForWhatsapp(msg, maxLen = 950) {
@@ -30,7 +31,6 @@ function truncateForWhatsapp(msg, maxLen = 950) {
   return msg.slice(0, maxLen - 40).trim() + '\n...(resposta resumida)';
 }
 
-// Only real keywords: cancel, greeting (user experience)
 const isCancel = text =>
   /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(text) ||
   text.includes('cancelar zazil') || text.includes('cancelar plano') || text.includes('cancelar assinatura') ||
@@ -99,8 +99,9 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
         const [lastQuery] = memoryContext.split(' | ').filter(q => q.includes('asked')).pop() || '';
         if (lastQuery) previousQuery = lastQuery.replace(/asked: /, '');
       }
-      const intentRes = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+      // Use Grok 4 for intent as well
+      const intentRes = await grok.chat.completions.create({
+        model: 'grok-4',
         temperature: 0,
         max_tokens: 20,
         messages: [
@@ -111,50 +112,38 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       intent = intentRes.choices?.[0]?.message?.content?.trim().split(':')[1] || 'none';
     } catch (e) { console.error('[INTENT] Error:', e); intent = 'none'; }
 
-    // MAIN ANSWER: Grok 4 primary with timed fallback to Perplexity then GPT-4o
+    // MAIN ANSWER: Grok 4 primary with timed fallback to Perplexity
     let mainAnswer = '';
     let usedModel = '';
     const cityForPrompt = city && city.length > 1 && city.toLowerCase() !== 'eua' ? city : (intent === 'event' && !city ? 'por favor, me diga sua cidade' : 'EUA');
 
     try {
+      // Try Grok (xAI) first, timeout after 5s
       const grokAnswer = await Promise.race([
-        new Promise((resolve) => setTimeout(() => resolve(null), 5000)), // 5s timeout
-        (async () => {
-          const grokResponse = await openai.chat.completions.create({
-            model: 'grok-4', // Adjust if xAI uses different endpoint
-            temperature: 0.3,
-            max_tokens: 2048,
-            messages: [
-              { role: 'system', content: ZAZIL_PROMPT },
-              { role: 'user', content: incoming + (cityForPrompt && !incoming.toLowerCase().includes(cityForPrompt.toLowerCase()) ? ` em ${cityForPrompt}` : '') }
-            ]
-          });
-          return grokResponse.choices[0].message.content || null;
-        })()
+        grok.chat.completions.create({
+          model: 'grok-4',
+          temperature: 0.3,
+          max_tokens: 2048,
+          messages: [
+            { role: 'system', content: ZAZIL_PROMPT },
+            { role: 'user', content: incoming + (cityForPrompt && !incoming.toLowerCase().includes(cityForPrompt.toLowerCase()) ? ` em ${cityForPrompt}` : '') }
+          ]
+        }).then(r => r.choices[0].message.content || null),
+        new Promise(resolve => setTimeout(() => resolve(null), 5000))
       ]);
 
       if (grokAnswer) {
         mainAnswer = grokAnswer;
         usedModel = 'Grok 4';
       } else {
-        // Fallback 1: Perplexity (search-focused)
+        // Fallback: Perplexity (search-focused)
         const { answer: perplexityAnswer } = await perplexityService.search(incoming, cityForPrompt);
         if (perplexityAnswer) {
           mainAnswer = perplexityAnswer;
           usedModel = 'Perplexity (fallback)';
         } else {
-          // Fallback 2: GPT-4o (general)
-          const gptResponse = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            temperature: 0.3,
-            max_tokens: 2048,
-            messages: [
-              { role: 'system', content: ZAZIL_PROMPT },
-              { role: 'user', content: incoming + (cityForPrompt && !incoming.toLowerCase().includes(cityForPrompt.toLowerCase()) ? ` em ${cityForPrompt}` : '') }
-            ]
-          });
-          mainAnswer = gptResponse.choices[0].message.content || "Desculpe, não consegui responder sua pergunta agora.";
-          usedModel = 'GPT-4o (fallback)';
+          mainAnswer = "Desculpe, não consegui responder sua pergunta agora.";
+          usedModel = 'Fallback (error)';
         }
       }
       console.log(`[AI] Answer generated by: ${usedModel}`);
@@ -185,7 +174,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       marketplaceDica = '';
     }
 
-    // Always append the Marketplace Dica (Brazilian Layer) if found; otherwise fallback
     let dicasBlock = '';
     if (marketplaceDica && marketplaceDica.trim().length > 3) {
       dicasBlock = `\n\n${marketplaceDica.trim()}`;
@@ -193,7 +181,6 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
       dicasBlock = '\n\nDica do Zazil: Sempre confira informações importantes em fontes oficiais ou com um profissional de confiança!';
     }
 
-    // Compose full message for truncation handling
     let fullContent = (mainAnswer || '').trim() + dicasBlock;
 
     // LOGS: For debugging (include intent)
@@ -224,7 +211,7 @@ app.post('/twilio-whatsapp', loggerMw(db), async (req, res) => {
 
     // Postprocess with hallucination check
     let replyObj = replyHelper.generic(safeContent);
-    replyObj = await postprocess(replyObj, incoming); // Async call
+    replyObj = await postprocess(replyObj, incoming);
 
     // Memory update
     await profileSvc.updateUsage(db, waNumber, replyObj.tokens || 0);
