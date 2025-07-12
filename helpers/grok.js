@@ -1,4 +1,4 @@
-// helpers/grok.js — OpenAI-Compatible for xAI (No New Installs, July 2025)
+// helpers/grok.js — OpenAI-Compatible Integration for Grok 4 (July 2025, No New NPM)
 
 const { OpenAI } = require('openai');
 
@@ -17,8 +17,8 @@ async function getGrokResponse(messages, model = 'grok-4') {
     });
     return response.choices[0].message.content.trim();
   } catch (err) {
-    console.error('[Grok Compat] Error:', err);
-    return null;
+    console.error('[Grok] Error:', err);
+    return null; // Trigger fallback in index.cjs
   }
 }
 
