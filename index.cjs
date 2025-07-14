@@ -16,7 +16,7 @@ const perplexityService = require('./helpers/perplexity');
 const postprocess = require('./helpers/postprocess');
 const memorySvc = require('./helpers/memory');
 const ZAZIL_PROMPT = require('./zazilPrompt');
-const agentTools = require('./agentTools');
+const agentTools = require('./helpers/agentTools');
 
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
