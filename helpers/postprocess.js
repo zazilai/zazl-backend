@@ -1,4 +1,4 @@
-// helpers/postprocess.js — Better Dedup, Cleaning & Hallucination Check (July 2025)
+// helpers/postprocess.js — Stronger Hallucination Check with Relevance (July 2025)
 
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -13,7 +13,7 @@ function dedupeDicas(text) {
   return unique.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
-// AI-driven hallucination check
+// AI-driven hallucination and relevance check
 async function checkHallucination(content, incoming) {
   try {
     const response = await openai.chat.completions.create({
@@ -21,18 +21,18 @@ async function checkHallucination(content, incoming) {
       temperature: 0,
       max_tokens: 10,
       messages: [
-        { role: 'system', content: 'Verifique se a resposta contém alucinações ou fatos não verificados para a pergunta. Retorne "sim" (tem alucinação) ou "não".' },
+        { role: 'system', content: 'Verifique se a resposta contém alucinações, fatos não verificados, ou conteúdo irrelevante para a pergunta (e.g., cidade errada). Retorne "sim" (tem problema) ou "não".' },
         { role: 'user', content: `Pergunta: ${incoming}\nResposta: ${content}` }
       ]
     });
     return response.choices[0].message.content.trim().toLowerCase() === 'sim';
   } catch (err) {
-    console.error('[Postprocess Hallucination] Error:', err);
-    return false; // Assume no hallucination on error to avoid blocking
+    console.error('[Postprocess] Error:', err);
+    return false;
   }
 }
 
-module.exports = async function postprocess(replyObj, incoming) {  // Made async for check
+module.exports = async function postprocess(replyObj, incoming) {
   let content = replyObj.content || '';
 
   content = cleanCitations(content);
@@ -42,10 +42,9 @@ module.exports = async function postprocess(replyObj, incoming) {  // Made async
     return replyObj;
   }
 
-  // Hallucination check
-  const hasHallucination = await checkHallucination(content, incoming);
-  if (hasHallucination) {
-    content = "Desculpe, detectei algo incerto na resposta. Aqui vai uma versão segura: Consulte fontes oficiais como o site do governo para detalhes precisos. Dica do Zazil: Com paciência, tudo se resolve!";
+  const hasIssue = await checkHallucination(content, incoming);
+  if (hasIssue) {
+    content = "Desculpe, detectei algo incerto ou irrelevante na resposta. Aqui vai uma versão segura: Consulte fontes oficiais. Dica do Zazil: Com paciência, tudo se resolve!";
   }
 
   if (!/dica do zazil/i.test(content)) {

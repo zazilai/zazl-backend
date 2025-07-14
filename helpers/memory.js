@@ -1,11 +1,11 @@
-// helpers/memory.js — Enhanced with RAG, Feedback, Follow-Up Detection (July 2025)
+// helpers/memory.js — Advanced RAG with Relevance Check & Conversation Summaries (July 2025)
 
 const { OpenAI } = require('openai');
 const { admin } = require('./firebase');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const db = admin.firestore();
 
-// Cosine similarity function (simple math, no deps)
+// Cosine similarity
 function cosineSimilarity(vecA, vecB) {
   let dotProduct = 0;
   let normA = 0;
@@ -18,20 +18,11 @@ function cosineSimilarity(vecA, vecB) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-// System prompt for personal data filtering
 const systemPrompt = `
-Você é um assistente de IA que mantém APENAS dados PESSOAIS e PERMANENTES do usuário (nome, cidade, profissão, interesses fixos, datas especiais). NÃO registre buscas, compras, perguntas ou interesses momentâneos (ex: eventos, produtos, notícias).
-Filtre rigorosamente: Se a mensagem NÃO contiver info pessoal nova, retorne o resumo anterior inalterado.
-Atualize apenas se houver novo dado pessoal claro. Mantenha o resumo em 1-2 frases curtas, natural.
-Exemplo:
-Resumo atual: Pedro mora em Austin.
-Nova mensagem: Sou engenheiro, aniversário em 10/10.
-Resumo atualizado: Pedro mora em Austin. Profissão: engenheiro. Aniversário: 10/10.
-
-Se nada novo ou mensagem curta como "sim" ou "nao", retorne exatamente o resumo atual.
+Mantenha APENAS dados PESSOAIS e PERMANENTES (nome, cidade, profissão, interesses fixos, datas especiais). NÃO registre perguntas, buscas ou respostas. Resuma conversas em 1 frase curta, natural, apenas com info nova permanente.
 `;
 
-// Detect feedback or follow-up intent
+// Detect intent
 async function detectIntent(message) {
   try {
     const response = await openai.chat.completions.create({
@@ -54,13 +45,11 @@ async function detectIntent(message) {
   }
 }
 
-// Update user summary with strict personal data filter
+// Update: Append summaries, no questions
 async function updateUserSummary(waNumber, oldSummary, userMessage) {
   try {
-    // Detect intent first
     const intent = await detectIntent(userMessage);
     if (intent === 'feedback') {
-      // Log feedback to Firestore
       await db.collection('feedback').add({
         waNumber,
         query: userMessage,
@@ -70,8 +59,7 @@ async function updateUserSummary(waNumber, oldSummary, userMessage) {
       return oldSummary || '';
     }
 
-    // Skip if follow-up or non-personal (AI-driven filter)
-    if (intent === 'follow-up' || !/\b(eu|meu|minha|sou|moro|morar|aniversário|profissão|trabalho|interesse|data|nome|cidade|país)\b/i.test(userMessage)) {
+    if (intent === 'follow-up' || !/\b(eu|meu|minha|sou|moro|profissão|interesse|cidade)\b/i.test(userMessage)) {
       return oldSummary || '';
     }
 
@@ -81,17 +69,15 @@ async function updateUserSummary(waNumber, oldSummary, userMessage) {
       max_tokens: 80,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Resumo atual:\n${oldSummary || 'Nenhum resumo ainda.'}\n\nNova mensagem:\n${userMessage}\n\nResumo atualizado:` }
+        { role: 'user', content: `Resumo atual: ${oldSummary || 'Nenhum'}. Nova mensagem: ${userMessage}. Resumo atualizado:` }
       ]
     });
 
-    let newSummary = response.choices?.[0]?.message?.content?.trim() || oldSummary;
-    if (newSummary === 'Nenhum resumo ainda.' || newSummary.length > 200) {
-      newSummary = oldSummary; // Prevent bloat
-    }
+    let newSummary = response.choices[0].message.content.trim() || oldSummary;
+    if (newSummary.length > 200) newSummary = oldSummary;
 
-    // RAG: Embed and store if changed
-    if (newSummary && newSummary !== oldSummary) {
+    if (newSummary !== oldSummary) {
+      // Embed and store
       const embeddingRes = await openai.embeddings.create({
         model: 'text-embedding-3-small',
         input: newSummary
@@ -102,7 +88,7 @@ async function updateUserSummary(waNumber, oldSummary, userMessage) {
         vector,
         timestamp: new Date()
       });
-      // Prune: Keep last 10 vectors
+      // Prune to 10
       const oldVectors = await db.collection('profiles').doc(waNumber).collection('memoryVectors').orderBy('timestamp', 'desc').limit(11).get();
       if (oldVectors.size > 10) {
         oldVectors.docs.slice(10).forEach(doc => doc.ref.delete());
@@ -116,7 +102,7 @@ async function updateUserSummary(waNumber, oldSummary, userMessage) {
   }
 }
 
-// Retrieve relevant memory context using RAG (top 2 similar)
+// Get context: Higher threshold, relevance check
 async function getMemoryContext(waNumber, query) {
   try {
     if (!query) return '';
@@ -132,9 +118,11 @@ async function getMemoryContext(waNumber, query) {
     let similarities = vectorsSnap.docs.map(doc => {
       const data = doc.data();
       return { id: doc.id, summary: data.summary, sim: cosineSimilarity(queryVec, data.vector) };
-    }).filter(s => s.sim > 0.7) // Threshold for relevance
+    }).filter(s => s.sim > 0.85) // Higher threshold for relevance
       .sort((a, b) => b.sim - a.sim)
-      .slice(0, 2); // Top 2
+      .slice(0, 2);
+
+    if (similarities.length === 0) return ''; // No relevant memory
 
     return similarities.map(s => s.summary).join(' | ');
   } catch (err) {

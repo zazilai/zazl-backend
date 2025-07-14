@@ -1,8 +1,8 @@
-// helpers/partners/eventsDica.js — With More Partners for Accuracy (July 2025)
+// helpers/partners/eventsDica.js — City-Personalized, Multiple Sources (July 2025)
 
 const axios = require('axios');
-const cheerio = require('cheerio'); // For HTML parsing (npm install cheerio if needed)
-const ticketmaster = require('../ticketmaster'); // Your existing Ticketmaster helper
+const cheerio = require('cheerio');
+const ticketmaster = require('../ticketmaster');
 
 // Normalize city
 function normalizeCity(city = '') {
@@ -32,7 +32,7 @@ function formatEvent(evt) {
   return line;
 }
 
-// Groovoo API call
+// Groovoo
 async function getGroovooEvents(city) {
   try {
     const res = await axios.get('https://api.groovoo.io/ticketing_events', { timeout: 5000 });
@@ -48,7 +48,7 @@ async function getGroovooEvents(city) {
   }
 }
 
-// Ticketmaster fallback
+// Ticketmaster
 async function getTicketmasterEvents(city) {
   try {
     return await ticketmaster.getEvents(city);
@@ -58,14 +58,14 @@ async function getTicketmasterEvents(city) {
   }
 }
 
-// Fallback: Meetup search (public scrape, no key needed)
+// Meetup
 async function getMeetupEvents(city) {
   try {
     const res = await axios.get(`https://www.meetup.com/find/events/?keywords=brazilian&location=us--${normalizeCity(city)}`, { timeout: 5000 });
     const $ = cheerio.load(res.data);
     const events = [];
     $('[data-testid="event-card"]').each((i, elem) => {
-      if (i >= 3) return false; // Top 3
+      if (i >= 3) return false;
       const name = $(elem).find('[data-testid="event-card-name"]').text().trim() || 'Evento';
       const url = $(elem).find('a').attr('href') || '';
       const date = $(elem).find('[data-testid="event-card-date"]').text().trim() || '';
@@ -79,14 +79,14 @@ async function getMeetupEvents(city) {
   }
 }
 
-// Fallback: Floripa Productions (scrape site)
+// Floripa
 async function getFloripaEvents(city) {
   try {
     const res = await axios.get('https://brazilianfestival.org/events', { timeout: 5000 });
     const $ = cheerio.load(res.data);
     const events = [];
-    $('.event-item').each((i, elem) => { // Adjust selector based on actual site HTML
-      if (i >= 3) return false; // Top 3
+    $('.event-item').each((i, elem) => {
+      if (i >= 3) return false;
       const name = $(elem).find('.event-title').text().trim() || 'Evento';
       const date = $(elem).find('.event-date').text().trim() || '';
       const location = $(elem).find('.event-location').text().trim() || '';
@@ -102,46 +102,28 @@ async function getFloripaEvents(city) {
   }
 }
 
-// Main with fallbacks
+// Main: Fallback chaining, city-required
 module.exports = async function eventsDica(message, userCity, userContext, intent) {
-  // Only fire for event/agenda/show queries
-  if (
-    intent !== 'EVENT' &&
-    !/\b(evento|agenda|show|balada|festa|programa|o que fazer)\b/i.test(message)
-  ) return '';
+  if (intent !== 'EVENT' && !/\b(evento|agenda|show|balada|festa|programa|o que fazer)\b/i.test(message)) return '';
 
   let city = userCity;
   if (!city && userContext) {
     const match = userContext.match(/moro em ([\w\s]+)/i);
     if (match) city = match[1].trim();
   }
+  if (!city) return 'Dica do Zazil: Me diga sua cidade para eventos personalizados!';
 
   let events = await getGroovooEvents(city);
+  if (!events.length) events = await getTicketmasterEvents(city);
+  if (!events.length) events = await getMeetupEvents(city);
+  if (!events.length) events = await getFloripaEvents(city);
 
-  if (!events.length) {
-    events = await getTicketmasterEvents(city);
-  }
+  if (!events.length) return 'Não achei eventos em ' + city + '. Tente Meetup ou Facebook groups!';
 
-  if (!events.length) {
-    events = await getMeetupEvents(city);
-  }
-
-  if (!events.length) {
-    events = await getFloripaEvents(city);
-  }
-
-  if (!events.length) return '';
-
-  // Filter/sort top 3
-  let foundEvents = events
+  const foundEvents = events
     .filter(evt => !!evt.start_at || !!evt.date)
     .sort((a, b) => new Date(a.start_at || a.date) - new Date(b.start_at || b.date))
     .slice(0, 3);
 
-  let dicaBlock =
-    `💡 *Dica do Zazil – Eventos Brasileiros nos EUA*\n` +
-    foundEvents.map(formatEvent).join('\n\n') +
-    `\n\nDica: Chegue cedo para garantir seu lugar, convide amigos, e confira sempre o link oficial antes de comprar ingressos!`;
-
-  return dicaBlock.trim();
+  return `💡 *Dica do Zazil – Eventos em ${city}*\n` + foundEvents.map(formatEvent).join('\n\n') + '\n\nDica: Convide amigos e chegue cedo!';
 };

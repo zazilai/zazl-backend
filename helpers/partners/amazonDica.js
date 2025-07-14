@@ -1,4 +1,4 @@
-// helpers/partners/amazonDica.js — Model-Driven Intent, No Hard-Coded Words (July 2025)
+// helpers/partners/amazonDica.js — Personalized with City, Affiliate (July 2025)
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -23,7 +23,7 @@ function getSignatureKey(key, dateStamp, regionName, serviceName) {
   return kSigning;
 }
 
-// STEP 1: Model-driven intent detection + keyword extraction
+// Model-driven intent + keywords
 async function detectAndExtractKeywords(message, city) {
   try {
     const response = await openai.chat.completions.create({
@@ -33,12 +33,12 @@ async function detectAndExtractKeywords(message, city) {
       messages: [
         {
           role: 'system',
-          content: 'Primeiro, classifique se a mensagem é sobre comprar um produto (shopping intent): "sim" ou "não". Se sim, extraia o termo de busca ideal para Amazon nos EUA, incluindo cidade se relevante. Retorne apenas: intent:sim|não; keywords:termo.'
+          content: 'Classifique se shopping intent: "sim" ou "não". Se sim, extraia termo de busca para Amazon, incluindo cidade. Retorne: intent:sim|não; keywords:termo.'
         },
-        { role: 'user', content: message + (city ? ` (usuário em ${city})` : '') }
+        { role: 'user', content: message + (city ? ` (em ${city})` : '') }
       ]
     });
-    const content = response.choices?.[0]?.message?.content?.trim() || '';
+    const content = response.choices[0].message.content.trim();
     const intentMatch = content.match(/intent:(sim|n.o)/i);
     const keywordsMatch = content.match(/keywords:(.+)/i);
     if (intentMatch?.[1].toLowerCase() === 'sim' && keywordsMatch?.[1]) {
@@ -46,12 +46,12 @@ async function detectAndExtractKeywords(message, city) {
     }
     return null;
   } catch (err) {
-    console.error('[AmazonDica detect] error:', err);
+    console.error('[AmazonDica] Error:', err);
     return null;
   }
 }
 
-// STEP 2: Call Amazon PA API (unchanged)
+// Amazon PA API call
 async function searchAmazonProducts(keywords) {
   const region = 'us-east-1';
   const service = 'ProductAdvertisingAPI';
@@ -123,26 +123,18 @@ async function searchAmazonProducts(keywords) {
   }
 }
 
-// Main: Model-driven, no hard-coded words
+// Main
 module.exports = async function amazonDica(message, city, context, intent) {
   const keywords = await detectAndExtractKeywords(message, city);
-  if (!keywords) return []; // No shopping intent detected by AI
-
-  if (!accessKey || !secretKey || !partnerTag) {
-    console.error('[amazonDica] Amazon env not set');
-    return [];
-  }
+  if (!keywords) return '';
 
   const items = await searchAmazonProducts(keywords);
 
   if (!items.length) {
     const { answer } = await perplexityService.search(message + " Amazon EUA");
-    if (answer) {
-      return [`🛒 Não achei produtos na Amazon, mas aqui vai uma dica extra:\n${answer}`];
-    } else {
-      return [];
-    }
+    if (answer) return `🛒 Não achei produtos na Amazon, mas aqui vai uma dica extra:\n${answer}`;
+    return '';
   }
 
-  return [replyHelper.amazon([items[0]]).content];
+  return replyHelper.amazon(items).content;
 };
