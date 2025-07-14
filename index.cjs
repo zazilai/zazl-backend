@@ -89,39 +89,30 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
 
       // Load personalization
       let profileDoc, memorySummary = '', city = '';
-      try {
-        profileDoc = await db.collection('profiles').doc(waNumber).get();
-        memorySummary = profileDoc.exists ? (profileDoc.data().memory || '') : '';
-        city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
-      } catch (e) {
-        city = '';
-      }
+      profileDoc = await db.collection('profiles').doc(waNumber).get();
+      memorySummary = profileDoc.exists ? (profileDoc.data().memory || '') : '';
+      city = profileDoc.exists && profileDoc.data().city ? profileDoc.data().city : '';
 
       // Detect intent
       let intent = 'none';
       let previousQuery = '';
-      try {
-        const memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
-        if (memoryContext) {
-          const [lastQuery] = memoryContext.split(' | ').filter(q => q.includes('asked')).pop() || '';
-          if (lastQuery) previousQuery = lastQuery.replace(/asked: /, '');
-        }
-        const intentRes = await axios.post('https://api.openai.com/v1/chat/completions', {
-          model: 'gpt-4o-mini',
-          temperature: 0,
-          max_tokens: 20,
-          messages: [
-            { role: 'system', content: 'Classifique a intenção como: "event", "current", "shopping", "feedback", "follow-up", ou "none".' },
-            { role: 'user', content: incoming + (previousQuery ? ` (contexto anterior: ${previousQuery})` : '') }
-          ]
-        }, {
-          headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }
-        });
-        intent = intentRes.data.choices?.[0]?.message?.content?.trim().split(':')[1] || 'none';
-      } catch (e) {
-        console.error('[INTENT] Error:', e);
-        intent = 'none';
+      const memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
+      if (memoryContext) {
+        const [lastQuery] = memoryContext.split(' | ').filter(q => q.includes('asked')).pop() || '';
+        if (lastQuery) previousQuery = lastQuery.replace(/asked: /, '');
       }
+      const intentRes = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        max_tokens: 20,
+        messages: [
+          { role: 'system', content: 'Classifique a intenção como: "event", "current", "shopping", "feedback", "follow-up", ou "none".' },
+          { role: 'user', content: incoming + (previousQuery ? ` (contexto anterior: ${previousQuery})` : '') }
+        ]
+      }, {
+        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }
+      });
+      intent = intentRes.data.choices?.[0]?.message?.content?.trim().split(':')[1] || 'none';
 
       // MAIN ANSWER: Grok 4 primary with timed fallback to Perplexity
       let mainAnswer = '';
