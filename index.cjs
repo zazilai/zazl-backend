@@ -57,6 +57,10 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
     const waNumber = req.body.From;
     const incomingLower = incoming.toLowerCase();
 
+    console.log('---- [DEBUG ZAZIL] Incoming Query ----');
+    console.log('User:', waNumber);
+    console.log('Q:', incoming);
+
     try {
       const { wasNew } = await profileSvc.load(db, waNumber);
       if (wasNew) {
@@ -103,6 +107,8 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
 
       // Get conversation context
       const memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
+      console.log('[DEBUG ZAZIL] Memory Context:', memoryContext);
+      console.log('[DEBUG ZAZIL] User City:', city);
 
       // Agentic Flow
       let messages = [
@@ -113,14 +119,16 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       let response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages,
-        tools: agentTools.tools, // Includes new USCIS tool
+        tools: agentTools.tools,
         tool_choice: 'auto'
       });
+      console.log('[DEBUG ZAZIL] Initial GPT Response:', JSON.stringify(response.choices[0].message, null, 2));
 
       let toolCalls = response.choices[0].message.tool_calls;
       let toolResponses = [];
 
       if (toolCalls) {
+        console.log('[DEBUG ZAZIL] Tool Calls:', JSON.stringify(toolCalls, null, 2));
         for (const toolCall of toolCalls) {
           const toolResponse = await agentTools.executeTool(toolCall);
           toolResponses.push({
@@ -135,6 +143,28 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           model: 'gpt-4o',
           messages
         });
+        console.log('[DEBUG ZAZIL] Response after Tools:', response.choices[0].message.content);
+      } else {
+        console.log('[DEBUG ZAZIL] No Tool Calls—Falling back to Grok/Perplexity');
+        // Explicit fallback to Grok
+        try {
+          const xaiRes = await axios.post('https://api.x.ai/v1/chat/completions', {
+            model: 'grok-4',
+            temperature: 0.3,
+            max_tokens: 2048,
+            messages
+          }, {
+            headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+            timeout: 5000
+          });
+          response.choices[0].message.content = xaiRes.data.choices[0].message.content;
+          console.log('[DEBUG ZAZIL] Grok Fallback Used');
+        } catch (xaiErr) {
+          console.error('[DEBUG ZAZIL] Grok Error:', xaiErr.message);
+          const { answer } = await perplexityService.search(incoming + (city ? ` in ${city}` : ''));
+          response.choices[0].message.content = answer;
+          console.log('[DEBUG ZAZIL] Perplexity Fallback Used');
+        }
       }
 
       let mainAnswer = response.choices[0].message.content || '';
@@ -144,14 +174,17 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       if (!toolCalls || toolCalls.length === 0) {
         marketplaceDica = await getMarketplaceDica({ message: incoming, city, context: memorySummary });
       }
+      console.log('[DEBUG ZAZIL] Marketplace Dica:', marketplaceDica);
 
       let dicasBlock = marketplaceDica ? `\n\n${marketplaceDica}` : '\n\nDica do Zazil: Sempre confira em fontes oficiais!';
 
       let fullContent = mainAnswer.trim() + dicasBlock;
+      console.log('[DEBUG ZAZIL] Full Content Length:', fullContent.length);
 
       // Fact-check
-      const factCheck = await perplexityService.search(`Verify: ${fullContent.slice(0, 200)}`);
-      if (factCheck.answer.includes('incorrect') || factCheck.answer.includes('hallucination')) {
+      const factCheck = await perplexityService.search(`Verify facts in this response for accuracy: ${fullContent.slice(0, 200)}`);
+      console.log('[DEBUG ZAZIL] Fact Check:', factCheck.answer);
+      if (factCheck.answer.toLowerCase().includes('incorrect') || factCheck.answer.toLowerCase().includes('hallucination')) {
         fullContent = 'Desculpe, detectei uma possível imprecisão. Aqui vai uma versão verificada: ' + factCheck.answer;
       }
 
@@ -175,6 +208,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       // Postprocess
       let replyObj = replyHelper.generic(safeContent);
       replyObj = await postprocess(replyObj, incoming);
+      console.log('[DEBUG ZAZIL] Postprocessed Content:', replyObj.content.slice(0, 100));
 
       // Update memory
       const summary = await openai.chat.completions.create({
@@ -184,6 +218,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           { role: 'user', content: incoming + '\nResposta: ' + mainAnswer }
         ]
       }).then(r => r.choices[0].message.content.trim());
+      console.log('[DEBUG ZAZIL] Memory Summary:', summary);
 
       await memorySvc.updateUserSummary(waNumber, memorySummary, summary);
 
@@ -193,13 +228,13 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
         to: waNumber
       });
-      console.log(`[Twilio] SID: ${message.sid}`);
+      console.log('[DEBUG ZAZIL] Twilio Send SID:', message.sid, '| Status:', message.status);
 
       // Delivery check
       setTimeout(async () => {
         const status = await twilioClient.messages(message.sid).fetch();
+        console.log('[DEBUG ZAZIL] Twilio Status Check:', status.status, '| Error:', status.errorMessage || 'None');
         if (status.status === 'failed' || status.status === 'undelivered') {
-          console.error(`[Twilio] Delivery failed SID: ${message.sid}`);
           await db.collection('deliveryErrors').add({
             waNumber,
             sid: message.sid,
@@ -210,7 +245,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       }, 5000);
 
     } catch (err) {
-      console.error(err);
+      console.error('[Async Processing] Error:', err);
       await twilioClient.messages.create({
         body: replyHelper.fallback().content,
         from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
