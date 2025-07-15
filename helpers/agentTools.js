@@ -3,6 +3,7 @@
 const amazonDica = require('./partners/amazonDica');
 const eventsDica = require('./partners/eventsDica');
 const remitlyDica = require('./partners/remitlyDica');
+const axios = require('axios');
 
 // List of tools for GPT function calling
 const tools = [
@@ -45,6 +46,20 @@ const tools = [
         properties: {}
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'getImmigrationChecklist',
+      description: 'Get immigration checklists/forms from USCIS API.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Type e.g. "green card" or "passport renewal"' }
+        },
+        required: ['type']
+      }
+    }
   }
 ];
 
@@ -60,6 +75,18 @@ async function executeTool(toolCall) {
     toolResponse = await eventsDica('', args.city);
   } else if (functionName === 'getCurrency') {
     toolResponse = await remitlyDica('', args.city);
+  } else if (functionName === 'getImmigrationChecklist') {
+    try {
+      const res = await axios.get(`https://www.uscis.gov/api/v1/forms?keywords=${encodeURIComponent(args.type)}`, { timeout: 5000 });
+      const forms = res.data.forms || [];
+      if (!forms.length) {
+        toolResponse = 'No checklists found on USCIS—check uscis.gov directly.';
+      } else {
+        toolResponse = forms.slice(0, 3).map(f => `${f.title}: ${f.description.slice(0, 100)}... Link: ${f.url}`).join('\n');
+      }
+    } catch (err) {
+      toolResponse = 'Unable to fetch USCIS checklist—visit uscis.gov/forms.';
+    }
   }
   return toolResponse;
 }

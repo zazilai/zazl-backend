@@ -113,7 +113,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       let response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages,
-        tools: agentTools.tools,
+        tools: agentTools.tools, // Includes new USCIS tool
         tool_choice: 'auto'
       });
 
@@ -157,6 +157,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
 
       // Truncation with Firestore
       let safeContent = '';
+      let truncateId = null;
       if (fullContent.length <= 950) {
         safeContent = fullContent;
       } else {
@@ -167,7 +168,8 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           answer: fullContent,
           createdAt: new Date()
         });
-        safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${docRef.id}`;
+        truncateId = docRef.id;
+        safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
       }
 
       // Postprocess
