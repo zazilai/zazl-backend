@@ -1,8 +1,9 @@
-// helpers/partners/eventsDica.js — City-Personalized, Multiple Sources (July 2025)
+// helpers/partners/eventsDica.js — With More Partners & Perplexity Fallback (July 2025)
 
 const axios = require('axios');
-const cheerio = require('cheerio');
-const ticketmaster = require('../ticketmaster');
+const cheerio = require('cheerio'); // For HTML parsing (npm install cheerio if needed)
+const ticketmaster = require('../ticketmaster'); // Your existing Ticketmaster helper
+const perplexityService = require('../perplexity');
 
 // Normalize city
 function normalizeCity(city = '') {
@@ -102,7 +103,7 @@ async function getFloripaEvents(city) {
   }
 }
 
-// Main: Fallback chaining, city-required
+// Main with fallbacks, Perplexity if all empty
 module.exports = async function eventsDica(message, userCity, userContext, intent) {
   if (intent !== 'EVENT' && !/\b(evento|agenda|show|balada|festa|programa|o que fazer)\b/i.test(message)) return '';
 
@@ -118,7 +119,11 @@ module.exports = async function eventsDica(message, userCity, userContext, inten
   if (!events.length) events = await getMeetupEvents(city);
   if (!events.length) events = await getFloripaEvents(city);
 
-  if (!events.length) return 'Não achei eventos em ' + city + '. Tente Meetup ou Facebook groups!';
+  if (!events.length) {
+    // Perplexity fallback for events
+    const { answer } = await perplexityService.search(`Current Brazilian events in ${city} July 2025`);
+    return answer ? `Dica do Zazil: ${answer}` : 'Não achei eventos em ' + city + '. Tente Meetup ou Facebook groups!';
+  }
 
   const foundEvents = events
     .filter(evt => !!evt.start_at || !!evt.date)
