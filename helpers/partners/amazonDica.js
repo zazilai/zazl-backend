@@ -1,4 +1,4 @@
-// helpers/partners/amazonDica.js — Personalized with City, Affiliate (July 2025)
+// helpers/partners/amazonDica.js — Model-Driven Intent, No Hard-Coded Words (July 2025)
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -116,7 +116,7 @@ async function searchAmazonProducts(keywords) {
       price: item.Offers?.Listings?.[0]?.Price?.DisplayAmount,
       url: item.DetailPageURL,
       image: item.Images?.Primary?.Medium?.URL
-    })).filter(i => i.title && i.url);
+    })).filter(i => i.title && i.url && i.price); // Filter for complete items with links/price
   } catch (err) {
     console.error('[amazonDica] Amazon PA API error:', err.response?.data || err.message || err);
     return [];
@@ -136,5 +136,7 @@ module.exports = async function amazonDica(message, city, context, intent) {
     return '';
   }
 
-  return replyHelper.amazon(items).content;
+  const formatted = replyHelper.amazon(items).content;
+  console.log('[DEBUG ZAZIL] Amazon Formatted:', formatted);
+  return formatted;
 };

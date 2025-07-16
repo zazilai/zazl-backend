@@ -131,6 +131,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         console.log('[DEBUG ZAZIL] Tool Calls:', JSON.stringify(toolCalls, null, 2));
         for (const toolCall of toolCalls) {
           const toolResponse = await agentTools.executeTool(toolCall);
+          console.log('[DEBUG ZAZIL] Tool Response for', toolCall.function.name, ':', toolResponse);
           toolResponses.push({
             tool_call_id: toolCall.id,
             role: 'tool',
@@ -158,12 +159,12 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
             timeout: 5000
           });
           response.choices[0].message.content = xaiRes.data.choices[0].message.content;
-          console.log('[DEBUG ZAZIL] Grok Fallback Used');
+          console.log('[DEBUG ZAZIL] Grok Fallback Used:', response.choices[0].message.content);
         } catch (xaiErr) {
           console.error('[DEBUG ZAZIL] Grok Error:', xaiErr.message);
           const { answer } = await perplexityService.search(incoming + (city ? ` in ${city}` : ''));
           response.choices[0].message.content = answer;
-          console.log('[DEBUG ZAZIL] Perplexity Fallback Used');
+          console.log('[DEBUG ZAZIL] Perplexity Fallback Used:', answer);
         }
       }
 
@@ -181,11 +182,11 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       let fullContent = mainAnswer.trim() + dicasBlock;
       console.log('[DEBUG ZAZIL] Full Content Length:', fullContent.length);
 
-      // Fact-check
-      const factCheck = await perplexityService.search(`Verify facts in this response for accuracy: ${fullContent.slice(0, 200)}`);
+      // Fact-check and overwrite if needed
+      const factCheck = await perplexityService.search(`Verify facts and add details if missing for: ${fullContent.slice(0, 200)}`);
       console.log('[DEBUG ZAZIL] Fact Check:', factCheck.answer);
-      if (factCheck.answer.toLowerCase().includes('incorrect') || factCheck.answer.toLowerCase().includes('hallucination')) {
-        fullContent = 'Desculpe, detectei uma possível imprecisão. Aqui vai uma versão verificada: ' + factCheck.answer;
+      if (factCheck.answer.toLowerCase().includes('incorrect') || factCheck.answer.toLowerCase().includes('hallucination') || factCheck.answer.toLowerCase().includes('correction') || factCheck.answer.toLowerCase().includes('missing')) {
+        fullContent = mainAnswer + '\n\nVerificação: ' + factCheck.answer;
       }
 
       // Truncation with Firestore
@@ -205,7 +206,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
       }
 
-      // Postprocess
+      // Postprocess (with dedupe)
       let replyObj = replyHelper.generic(safeContent);
       replyObj = await postprocess(replyObj, incoming);
       console.log('[DEBUG ZAZIL] Postprocessed Content:', replyObj.content.slice(0, 100));

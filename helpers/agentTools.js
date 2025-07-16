@@ -5,7 +5,6 @@ const eventsDica = require('./partners/eventsDica');
 const remitlyDica = require('./partners/remitlyDica');
 const axios = require('axios');
 
-// List of tools for GPT function calling
 const tools = [
   {
     type: 'function',
@@ -55,7 +54,7 @@ const tools = [
       parameters: {
         type: 'object',
         properties: {
-          type: { type: 'string', description: 'Type e.g. "green card" or "passport renewal"' }
+          type: { type: 'string', description: 'Type e.g. "green card" or "passport renewal" or form number like "i-360"' }
         },
         required: ['type']
       }
@@ -63,7 +62,7 @@ const tools = [
   }
 ];
 
-// Execute the tool call
+// Execute
 async function executeTool(toolCall) {
   const functionName = toolCall.function.name;
   const args = JSON.parse(toolCall.function.arguments);
@@ -77,10 +76,11 @@ async function executeTool(toolCall) {
     toolResponse = await remitlyDica('', args.city);
   } else if (functionName === 'getImmigrationChecklist') {
     try {
-      const res = await axios.get(`https://www.uscis.gov/api/v1/forms?keywords=${encodeURIComponent(args.type)}`, { timeout: 5000 });
+      const query = args.type.toLowerCase().includes('i-360') ? 'i-360' : args.type; // Better query handling
+      const res = await axios.get(`https://www.uscis.gov/api/v1/forms?keywords=${encodeURIComponent(query)}`, { timeout: 5000 });
       const forms = res.data.forms || [];
       if (!forms.length) {
-        toolResponse = 'No checklists found on USCIS—check uscis.gov directly.';
+        toolResponse = 'No checklists found on USCIS for "' + args.type + '"—check uscis.gov/forms directly.';
       } else {
         toolResponse = forms.slice(0, 3).map(f => `${f.title}: ${f.description.slice(0, 100)}... Link: ${f.url}`).join('\n');
       }
