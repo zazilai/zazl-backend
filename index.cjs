@@ -123,7 +123,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           ]
         }, {
           headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-          timeout: 5000
+          timeout: 10000 // Increased to 10000ms
         });
         mainAnswer = xaiRes.data.choices[0].message.content || '';
         console.log('[DEBUG ZAZIL] Grok Main Answer:', mainAnswer.slice(0, 200));
@@ -199,7 +199,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           waNumber,
           question: incoming,
           answer: fullContent,
-          created_at: new Date()
+          createdAt: new Date()
         });
         truncateId = docRef.id;
         safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
