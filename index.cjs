@@ -1,4 +1,4 @@
-// index.cjs — Zazil 2025: Agentic, Hybrid AI with Low Hallucination (FINAL PRODUCTION)
+// index.cjs — Zazil Backend (Production-Ready, Great Product, 2025)
 
 require('dotenv').config();
 const express = require('express');
@@ -7,7 +7,6 @@ const { admin } = require('./helpers/firebase');
 const twilio = require('twilio');
 const axios = require('axios');
 const { OpenAI } = require('openai');
-
 const replyHelper = require('./helpers/reply');
 const loggerMw = require('./middleware/logger');
 const profileSvc = require('./helpers/profile');
@@ -17,7 +16,6 @@ const postprocess = require('./helpers/postprocess');
 const memorySvc = require('./helpers/memory');
 const ZAZIL_PROMPT = require('./zazilPrompt');
 const agentTools = require('./helpers/agentTools');
-
 const stripeWebhook = require('./routes/webhook');
 const checkoutRoute = require('./routes/checkout');
 const manageRoute = require('./routes/manage');
@@ -31,16 +29,25 @@ const app = express();
 function truncateForWhatsapp(msg, maxLen = 950) {
   if (!msg) return '';
   if (msg.length <= maxLen) return msg;
-  return msg.slice(0, maxLen - 40).trim() + '\n...(resposta resumida)';
+  const truncated = msg.slice(0, maxLen - 100);
+  const lastPunct = Math.max(
+    truncated.lastIndexOf('.'),
+    truncated.lastIndexOf('!'),
+    truncated.lastIndexOf('?')
+  );
+  if (lastPunct > maxLen - 200) {
+    return truncated.slice(0, lastPunct + 1) + '\n\n...(continua)';
+  }
+  return truncated.trim() + '\n\n...(continua)';
 }
 
 const isCancel = text =>
-  /\bcancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?\b/.test(text) ||
+  /\b(cancel(ar|o|amento)?( minha)?( assinatura| plano| subscription)?|quero cancelar)\b/i.test(text) ||
   text.includes('cancelar zazil') ||
   text.includes('cancel my plan') ||
   text.includes('cancel subscription');
 
-const greetingRegex = /\b(oi|olá|ola|hello|hi|eai|eaí|salve)[,.!\s\-]*(zazil)?\b/i;
+const greetingRegex = /^(oi|olá|ola|hello|hi|hey|eai|eaí|salve|bom dia|boa tarde|boa noite)[,.!\s]*(zazil)?$/i;
 
 app.post('/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhook);
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -57,9 +64,10 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
     const waNumber = req.body.From;
     const incomingLower = incoming.toLowerCase();
 
-    console.log('---- [DEBUG ZAZIL] Incoming Query ----');
-    console.log('User:', waNumber);
-    console.log('Q:', incoming);
+    console.log('==== [ZAZIL] New Message ====');
+    console.log('From:', waNumber);
+    console.log('Message:', incoming);
+    console.log('Time:', new Date().toISOString());
 
     try {
       const { wasNew } = await profileSvc.load(db, waNumber);
@@ -74,8 +82,12 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
 
       const quota = await profileSvc.getQuotaStatus(db, waNumber);
       if (!quota.allowed) {
+        const quotaReply = quota.reason === 'trial_expired'
+          ? replyHelper.trialExpired(waNumber).content
+          : replyHelper.upgrade(waNumber).content;
+
         await twilioClient.messages.create({
-          body: replyHelper.upgrade(waNumber).content,
+          body: quotaReply,
           from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
           to: waNumber
         });
@@ -100,152 +112,180 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         return;
       }
 
-      // Load profile
       const profile = await profileSvc.getProfile(db, waNumber);
       const memorySummary = profile.memory || '';
-      const city = profile.city || '';
+      let city = profile.city || '';
 
-      // Get conversation context
+      if (!city) {
+        city = await memorySvc.getUserCity(waNumber);
+      }
+
       const memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
-      console.log('[DEBUG ZAZIL] Memory Context:', memoryContext);
-      console.log('[DEBUG ZAZIL] User City:', city);
+      console.log('[ZAZIL] Memory Context:', memoryContext);
+      console.log('[ZAZIL] User City:', city);
 
-      // Main Answer: Always start with Grok/Perplexity for base response
+      const needsCity = await memorySvc.needsCityContext(incoming);
+      let queryForMainAnswer = incoming;
+
+      if (needsCity && city && !incoming.toLowerCase().includes(city.toLowerCase())) {
+        queryForMainAnswer = `${incoming} em ${city}`;
+        console.log('[ZAZIL] Enhanced query with city:', queryForMainAnswer);
+      }
+
+      if (memoryContext) {
+        queryForMainAnswer += ` (contexto: ${memoryContext})`;
+      }
+
       let mainAnswer = '';
+      let answerSource = '';
+
       try {
-        const xaiRes = await axios.post('https://api.x.ai/v1/chat/completions', {
-          model: 'grok-4',
-          temperature: 0.3,
-          max_tokens: 2048,
-          messages: [
-            { role: 'system', content: ZAZIL_PROMPT },
-            { role: 'user', content: incoming + (memoryContext ? ` (contexto anterior: ${memoryContext})` : '') + (city ? ` (em ${city})` : '') }
-          ]
-        }, {
-          headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-          timeout: 10000 // Increased to 10000ms
-        });
-        mainAnswer = xaiRes.data.choices[0].message.content || '';
-        console.log('[DEBUG ZAZIL] Grok Main Answer:', mainAnswer.slice(0, 200));
-      } catch (xaiErr) {
-        console.error('[DEBUG ZAZIL] Grok Error:', xaiErr.message);
-        const { answer } = await perplexityService.search(incoming + (city ? ` in ${city}` : ''));
-        mainAnswer = answer;
-        console.log('[DEBUG ZAZIL] Perplexity Main Answer:', mainAnswer.slice(0, 200));
-      }
-
-      // Agentic Tools for Enhancement
-      let messages = [
-        { role: 'system', content: ZAZIL_PROMPT },
-        { role: 'user', content: incoming + (memoryContext ? ` (contexto anterior: ${memoryContext})` : '') + (city ? ` (usuário em ${city})` : '') }
-      ];
-
-      let response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages,
-        tools: agentTools.tools,
-        tool_choice: 'auto'
-      });
-      console.log('[DEBUG ZAZIL] Initial GPT Response:', JSON.stringify(response.choices[0].message, null, 2));
-
-      let toolCalls = response.choices[0].message.tool_calls;
-      let toolResponses = [];
-
-      if (toolCalls) {
-        console.log('[DEBUG ZAZIL] Tool Calls:', JSON.stringify(toolCalls, null, 2));
-        for (const toolCall of toolCalls) {
-          const toolResponse = await agentTools.executeTool(toolCall);
-          console.log('[DEBUG ZAZIL] Tool Response for', toolCall.function.name, ':', toolResponse);
-          toolResponses.push({
-            tool_call_id: toolCall.id,
-            role: 'tool',
-            name: toolCall.function.name,
-            content: toolResponse
-          });
+        console.log('[ZAZIL] Trying Perplexity...');
+        const perplexityResponse = await perplexityService.search(queryForMainAnswer);
+        if (perplexityResponse && perplexityResponse.answer && perplexityResponse.answer.length > 50) {
+          mainAnswer = perplexityResponse.answer;
+          answerSource = 'perplexity';
+        } else {
+          throw new Error('Perplexity response insufficient');
         }
-        messages = messages.concat(response.choices[0].message, toolResponses);
-        response = await openai.chat.completions.create({
+      } catch {
+        try {
+          console.log('[ZAZIL] Trying Grok4...');
+          const grokRes = await axios.post('https://api.x.ai/v1/chat/completions', {
+            model: 'grok-4',
+            temperature: 0.3,
+            max_tokens: 2048,
+            messages: [
+              { role: 'system', content: ZAZIL_PROMPT },
+              { role: 'user', content: queryForMainAnswer }
+            ]
+          }, {
+            headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}` },
+            timeout: 8000
+          });
+          mainAnswer = grokRes.data.choices[0].message.content || '';
+          answerSource = 'grok4';
+        } catch {
+          console.log('[ZAZIL] Falling back to GPT-4o...');
+          const gptRes = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            temperature: 0.5,
+            max_tokens: 2048,
+            messages: [
+              { role: 'system', content: ZAZIL_PROMPT },
+              { role: 'user', content: queryForMainAnswer }
+            ]
+          });
+          mainAnswer = gptRes.choices[0].message.content || '';
+          answerSource = 'gpt4o';
+        }
+      }
+
+      console.log(`[ZAZIL] Answer from ${answerSource}, length: ${mainAnswer.length}`);
+
+      let toolEnrichment = '';
+      try {
+        const toolResponse = await openai.chat.completions.create({
           model: 'gpt-4o',
-          messages
+          messages: [
+            {
+              role: 'system',
+              content: `${ZAZIL_PROMPT}\n\nIMPORTANT: User is in ${city || 'unknown city'}. Use this for all location-based tool calls.`
+            },
+            {
+              role: 'user',
+              content: `Query: ${incoming}\nUser city: ${city}`
+            }
+          ],
+          tools: agentTools.tools,
+          tool_choice: 'auto',
+          temperature: 0.3
         });
-        console.log('[DEBUG ZAZIL] Response after Tools:', response.choices[0].message.content);
-        mainAnswer += '\n\n' + response.choices[0].message.content; // Append tool enhancements to main
+
+        const toolCalls = toolResponse.choices[0].message.tool_calls || [];
+        const results = await Promise.all(toolCalls.map(async (tc) => {
+          try {
+            const args = JSON.parse(tc.function.arguments);
+            if (['searchEvents', 'searchAmazon'].includes(tc.function.name) && city) {
+              args.city = city;
+              tc.function.arguments = JSON.stringify(args);
+            }
+            return await agentTools.executeTool(tc);
+          } catch (err) {
+            console.error(`[ZAZIL] Tool ${tc.function.name} error:`, err);
+            return null;
+          }
+        }));
+        toolEnrichment = results.filter(Boolean).join('\n\n');
+      } catch (err) {
+        console.error('[ZAZIL] Tool enrichment error:', err);
       }
 
-      // Marketplace Dica as separate portion
-      let marketplaceDica = await getMarketplaceDica({ message: incoming, city, context: memorySummary });
-      console.log('[DEBUG ZAZIL] Marketplace Dica:', marketplaceDica);
-
-      let dicasBlock = marketplaceDica ? `\n\n${marketplaceDica}` : '\n\nDica do Zazil: Sempre confira em fontes oficiais!';
-
-      let fullContent = mainAnswer.trim() + dicasBlock;
-      console.log('[DEBUG ZAZIL] Full Content Length:', fullContent.length);
-
-      // Fact-check
-      const factCheck = await perplexityService.search(`Verify: ${fullContent.slice(0, 200)}`);
-      console.log('[DEBUG ZAZIL] Fact Check:', factCheck.answer);
-      if (factCheck.answer.includes('incorrect') || factCheck.answer.includes('hallucination')) {
-        fullContent = 'Desculpe, detectei uma possível imprecisão. Aqui vai uma versão verificada: ' + factCheck.answer;
+      let marketplaceDica = '';
+      try {
+        marketplaceDica = await getMarketplaceDica({
+          message: incoming,
+          city,
+          context: memorySummary
+        });
+      } catch (err) {
+        console.error('[ZAZIL] Marketplace dica error:', err);
       }
 
-      // Truncation with Firestore
-      let safeContent = '';
-      let truncateId = null;
-      if (fullContent.length <= 950) {
-        safeContent = fullContent;
-      } else {
-        const short = truncateForWhatsapp(fullContent, 850);
+      let fullContent = mainAnswer.trim();
+      const enrichments = [];
+      if (toolEnrichment) enrichments.push(toolEnrichment);
+      if (marketplaceDica && !toolEnrichment.includes(marketplaceDica)) enrichments.push(marketplaceDica);
+
+      if (enrichments.length) {
+        fullContent += '\n\n💡 Dica do Zazil:\n' + enrichments.join('\n\n');
+      } else if (!/dica do zazil/i.test(fullContent)) {
+        fullContent += '\n\n💡 Dica do Zazil: Sempre confirme informações em fontes oficiais!';
+      }
+
+      let replyObj = replyHelper.generic(fullContent);
+      replyObj = await postprocess(replyObj, incoming);
+
+      let finalContent = replyObj.content;
+      if (finalContent.length > 950) {
         const docRef = await db.collection('longReplies').add({
           waNumber,
           question: incoming,
-          answer: fullContent,
+          answer: finalContent,
           createdAt: new Date()
         });
-        truncateId = docRef.id;
-        safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
+        const truncated = truncateForWhatsapp(finalContent, 850);
+        finalContent = `${truncated}\n\n📖 Resposta completa: ${process.env.PROJECT_URL}/view/${docRef.id}`;
       }
 
-      // Postprocess
-      let replyObj = replyHelper.generic(safeContent);
-      replyObj = await postprocess(replyObj, incoming);
-      console.log('[DEBUG ZAZIL] Postprocessed Content:', replyObj.content.slice(0, 100));
-
-      // Update memory
-      const summary = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'Resuma a conversa em 1 frase curta para memória permanente, apenas dados pessoais/permanentes.' },
-          { role: 'user', content: incoming + '\nResposta: ' + mainAnswer }
-        ]
-      }).then(r => r.choices[0].message.content.trim());
-      console.log('[DEBUG ZAZIL] Memory Summary:', summary);
-
-      await memorySvc.updateUserSummary(waNumber, memorySummary, summary);
-
-      // Send via Twilio
       const message = await twilioClient.messages.create({
-        body: replyObj.content,
+        body: finalContent,
         from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,
         to: waNumber
       });
-      console.log('[DEBUG ZAZIL] Twilio Send SID:', message.sid, '| Status:', message.status);
 
-      // Delivery check
+      console.log('[ZAZIL] Message sent:', message.sid);
+
+      await memorySvc.updateUserSummary(waNumber, memorySummary, incoming, mainAnswer);
+      await profileSvc.updateUsage(db, waNumber, 1);
+
       setTimeout(async () => {
-        const status = await twilioClient.messages(message.sid).fetch();
-        console.log('[DEBUG ZAZIL] Twilio Status Check:', status.status, '| Error:', status.errorMessage || 'None');
-        if (status.status === 'failed' || status.status === 'undelivered') {
-          await db.collection('deliveryErrors').add({
-            waNumber,
-            sid: message.sid,
-            error: status.errorMessage || 'Unknown',
-            timestamp: new Date()
-          });
+        try {
+          const status = await twilioClient.messages(message.sid).fetch();
+          if (['failed', 'undelivered'].includes(status.status)) {
+            await db.collection('deliveryErrors').add({
+              waNumber,
+              sid: message.sid,
+              error: status.errorMessage || 'Unknown',
+              timestamp: new Date()
+            });
+          }
+        } catch (err) {
+          console.error('[ZAZIL] Delivery status error:', err);
         }
       }, 5000);
-
     } catch (err) {
-      console.error('[Async Processing] Error:', err);
+      console.error('[ZAZIL] Critical error:', err);
       await twilioClient.messages.create({
         body: replyHelper.fallback().content,
         from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_NUMBER,

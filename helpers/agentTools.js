@@ -1,21 +1,29 @@
-// helpers/agentTools.js — Agentic Tool Calling with Parallel Support (July 2025)
+// helpers/agentTools.js — Agentic Tool System (Production Ready)
 
 const amazonDica = require('./partners/amazonDica');
 const eventsDica = require('./partners/eventsDica');
 const remitlyDica = require('./partners/remitlyDica');
 const axios = require('axios');
 
+// Tool definitions with rich descriptions
 const tools = [
   {
     type: 'function',
     function: {
       name: 'searchAmazon',
-      description: 'Search Amazon for products with affiliate link.',
+      description:
+        'Search Amazon for products and return affiliate links. Use when user asks about buying products, prices, or where to find items.',
       parameters: {
         type: 'object',
         properties: {
-          keywords: { type: 'string', description: 'Search keywords' },
-          city: { type: 'string', description: 'User city for localization' }
+          keywords: {
+            type: 'string',
+            description: 'Product search keywords'
+          },
+          city: {
+            type: 'string',
+            description: 'User city for shipping context (optional)'
+          }
         },
         required: ['keywords']
       }
@@ -25,11 +33,19 @@ const tools = [
     type: 'function',
     function: {
       name: 'searchEvents',
-      description: 'Search for Brazilian events in user city.',
+      description:
+        'Search for Brazilian events and cultural activities. Use when user asks about events, parties, shows, or things to do.',
       parameters: {
         type: 'object',
         properties: {
-          city: { type: 'string', description: 'User city' }
+          city: {
+            type: 'string',
+            description: 'City to search events in'
+          },
+          query: {
+            type: 'string',
+            description: 'Optional specific event type or keywords'
+          }
         },
         required: ['city']
       }
@@ -38,57 +54,204 @@ const tools = [
   {
     type: 'function',
     function: {
-      name: 'getCurrency',
-      description: 'Get currency exchange rates.',
+      name: 'getCurrencyRate',
+      description:
+        'Get current USD to BRL exchange rate. Use when user asks about dollar rate, currency exchange, or sending money to Brazil.',
       parameters: {
         type: 'object',
-        properties: {}
+        properties: {
+          amount: {
+            type: 'number',
+            description: 'Optional amount to convert'
+          }
+        }
       }
     }
   },
   {
     type: 'function',
     function: {
-      name: 'getImmigrationChecklist',
-      description: 'Get immigration checklists/forms from USCIS API.',
+      name: 'searchServices',
+      description:
+        'Search for Brazilian services and businesses in a city. Use for professional services, restaurants, stores, etc.',
       parameters: {
         type: 'object',
         properties: {
-          type: { type: 'string', description: 'Type e.g. "green card" or "passport renewal" or form number like "i-360"' }
+          serviceType: {
+            type: 'string',
+            description: 'Type of service (e.g., "cabeleireiro", "dentista", "mercado brasileiro")'
+          },
+          city: {
+            type: 'string',
+            description: 'City to search in'
+          }
         },
-        required: ['type']
+        required: ['serviceType', 'city']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'getImmigrationInfo',
+      description:
+        'Get immigration forms, checklists, and USCIS information. Use for visa, green card, citizenship questions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: {
+            type: 'string',
+            description: 'Immigration topic or form number (e.g., "green card", "i-360", "citizenship")'
+          }
+        },
+        required: ['topic']
       }
     }
   }
 ];
 
-// Execute
+// Tool executor
 async function executeTool(toolCall) {
   const functionName = toolCall.function.name;
-  const args = JSON.parse(toolCall.function.arguments);
-
-  let toolResponse = '';
-  if (functionName === 'searchAmazon') {
-    toolResponse = await amazonDica(args.keywords, args.city);
-  } else if (functionName === 'searchEvents') {
-    toolResponse = await eventsDica('', args.city);
-  } else if (functionName === 'getCurrency') {
-    toolResponse = await remitlyDica('', args.city);
-  } else if (functionName === 'getImmigrationChecklist') {
-    try {
-      const query = args.type.toLowerCase().includes('i-360') ? 'i-360' : args.type; // Better query handling
-      const res = await axios.get(`https://www.uscis.gov/api/v1/forms?keywords=${encodeURIComponent(query)}`, { timeout: 5000 });
-      const forms = res.data.forms || [];
-      if (!forms.length) {
-        toolResponse = 'No checklists found on USCIS for "' + args.type + '"—check uscis.gov/forms directly.';
-      } else {
-        toolResponse = forms.slice(0, 3).map(f => `${f.title}: ${f.description.slice(0, 100)}... Link: ${f.url}`).join('\n');
-      }
-    } catch (err) {
-      toolResponse = 'Unable to fetch USCIS checklist—visit uscis.gov/forms.';
-    }
+  let args;
+  try {
+    args = JSON.parse(toolCall.function.arguments);
+  } catch (error) {
+    console.error(`[AgentTools] Invalid arguments for ${functionName}:`, toolCall.function.arguments);
+    return formatToolError(functionName, 'Invalid parameters');
   }
-  return toolResponse;
+
+  console.log(`[AgentTools] Executing ${functionName} with:`, args);
+
+  try {
+    switch (functionName) {
+      case 'searchAmazon':
+        return await executeAmazonSearch(args);
+      case 'searchEvents':
+        return await executeEventSearch(args);
+      case 'getCurrencyRate':
+        return await executeCurrencyRate(args);
+      case 'searchServices':
+        return await executeServiceSearch(args);
+      case 'getImmigrationInfo':
+        return await executeImmigrationInfo(args);
+      default:
+        return formatToolError(functionName, 'Unknown tool');
+    }
+  } catch (error) {
+    console.error(`[AgentTools] Error executing ${functionName}:`, error);
+    return formatToolError(functionName, error.message);
+  }
 }
 
-module.exports = { tools, executeTool };
+// Amazon search
+async function executeAmazonSearch(args) {
+  const { keywords, city } = args;
+  const result = await amazonDica(keywords, city || '', '', 'TOOL_CALL');
+  if (!result || result.includes('Não encontrei produtos')) {
+    return formatEmptyResult('amazon', keywords);
+  }
+  return result;
+}
+
+// Event search
+async function executeEventSearch(args) {
+  const { city, query } = args;
+  if (!city) {
+    return '🎉 Para encontrar eventos, preciso saber em qual cidade você está. Me diga sua cidade!';
+  }
+  const result = await eventsDica(query || 'eventos brasileiros', city, '', 'TOOL_CALL');
+  if (!result || result.includes('Não achei eventos')) {
+    return formatEmptyResult('events', city);
+  }
+  return result;
+}
+
+// Currency rate
+async function executeCurrencyRate(args) {
+  try {
+    const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', { timeout: 3000 });
+    const rate = response.data.rates.BRL;
+    const amount = args.amount || 1;
+    const converted = (amount * rate).toFixed(2);
+
+    let result = `💵 **Cotação do Dólar Agora**\n`;
+    result += `1 USD = R$ ${rate.toFixed(2)}\n`;
+
+    if (args.amount && args.amount !== 1) {
+      result += `💰 $${amount} = R$ ${converted}\n`;
+    }
+
+    result += `\n💸 Envie dinheiro com segurança pela Remitly: https://remit.ly/1bh2ujzp`;
+
+    return result;
+  } catch (error) {
+    return await remitlyDica('cotação', '', '', 'TOOL_CALL');
+  }
+}
+
+// Service search
+async function executeServiceSearch(args) {
+  const { serviceType, city } = args;
+  return `🔍 ${serviceType} em ${city}\n\nPara encontrar ${serviceType} brasileiros em ${city}, recomendo:\n\n📱 Facebook Groups: "Brasileiros em ${city}"\n🔎 Google Maps: Busque "${serviceType} brasileiro near me"\n💬 WhatsApp: Grupos da comunidade brasileira local\n📍 Nextdoor: Peça recomendações no app\n\n💡 Dica: Sempre peça referências e compare preços!`;
+}
+
+// Immigration info
+async function executeImmigrationInfo(args) {
+  const { topic } = args;
+  try {
+    const response = await axios.get(
+      `https://www.uscis.gov/api/v1/forms?keywords=${encodeURIComponent(topic)}`,
+      { timeout: 5000 }
+    );
+
+    const forms = response.data.forms || [];
+
+    if (forms.length === 0) {
+      return `📋 Não encontrei formulários específicos para "${topic}".\n\n📌 Recursos úteis:\n- Site oficial: https://www.uscis.gov\n- Central de formulários: https://www.uscis.gov/forms\n- Telefone USCIS: 1-800-375-5283\n\n💡 Dica: Sempre consulte um advogado de imigração para casos específicos!`;
+    }
+
+    let result = `📋 **Informações USCIS sobre "${topic}"**\n\n`;
+
+    forms.slice(0, 3).forEach(form => {
+      result += `📄 **${form.title}**\n`;
+      if (form.description) {
+        result += `${form.description.slice(0, 150)}...\n`;
+      }
+      if (form.url) {
+        result += `🔗 Link: ${form.url}\n`;
+      }
+      result += '\n';
+    });
+
+    result += `⚖️ Estas informações são apenas orientação. Consulte um advogado!`;
+
+    return result;
+  } catch (error) {
+    return formatToolError('immigration', `Erro ao buscar informações sobre "${topic}"`);
+  }
+}
+
+// Helpers
+function formatEmptyResult(toolType, searchTerm) {
+  const messages = {
+    amazon: `🔍 Não encontrei produtos para "${searchTerm}" na Amazon agora. Tente termos mais específicos ou diferentes!`,
+    events: `📅 Não encontrei eventos brasileiros em "${searchTerm}". Procure em grupos do Facebook ou Meetup!`,
+    services: `🔍 Não encontrei serviços "${searchTerm}". Tente grupos da comunidade local!`
+  };
+  return messages[toolType] || 'Não encontrei resultados.';
+}
+
+function formatToolError(toolName, error) {
+  return `⚠️ Desculpe, tive um problema ao buscar "${toolName}". Detalhes: ${error}. Tente novamente!`;
+}
+
+module.exports = {
+  tools,
+  executeTool,
+  executeAmazonSearch,
+  executeEventSearch,
+  executeCurrencyRate,
+  executeServiceSearch,
+  executeImmigrationInfo
+};

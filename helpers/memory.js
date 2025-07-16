@@ -1,11 +1,11 @@
-// helpers/memory.js — Advanced RAG with Relevance Check & Conversation Summaries (July 2025)
+// helpers/memory.js — Smart Memory System with City Context (Production Ready)
 
 const { OpenAI } = require('openai');
 const { admin } = require('./firebase');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const db = admin.firestore();
 
-// Cosine similarity
+// Cosine similarity for vector comparison
 function cosineSimilarity(vecA, vecB) {
   let dotProduct = 0;
   let normA = 0;
@@ -18,117 +18,284 @@ function cosineSimilarity(vecA, vecB) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-const systemPrompt = `
-Mantenha APENAS dados PESSOAIS e PERMANENTES (nome, cidade, profissão, interesses fixos, datas especiais). NÃO registre perguntas, buscas ou respostas. Resuma conversas em 1 frase curta, natural, apenas com info nova permanente.
-`;
-
-// Detect intent
-async function detectIntent(message) {
+// AI-powered memory extraction
+async function extractMemorableInfo(userMessage, assistantResponse = '') {
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0,
-      max_tokens: 20,
-      messages: [
-        {
-          role: 'system',
-          content: 'Classifique a mensagem como: "feedback" (ex: sim/nao), "follow-up" (resposta curta a pergunta anterior), ou "none". Retorne apenas: type:feedback|follow-up|none.'
-        },
-        { role: 'user', content: message }
-      ]
-    });
-    const content = response.choices?.[0]?.message?.content?.trim() || 'type:none';
-    return content.split(':')[1] || 'none';
-  } catch (err) {
-    console.error('[MEMORY] Intent detection error:', err);
-    return 'none';
-  }
-}
-
-// Update: Append summaries, no questions
-async function updateUserSummary(waNumber, oldSummary, userMessage) {
-  try {
-    const intent = await detectIntent(userMessage);
-    if (intent === 'feedback') {
-      await db.collection('feedback').add({
-        waNumber,
-        query: userMessage,
-        rating: userMessage.toLowerCase().includes('sim') ? 'positive' : 'negative',
-        timestamp: new Date()
-      });
-      return oldSummary || '';
-    }
-
-    if (intent === 'follow-up' || !/\b(eu|meu|minha|sou|moro|profissão|interesse|cidade)\b/i.test(userMessage)) {
-      return oldSummary || '';
-    }
-
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       temperature: 0.1,
-      max_tokens: 80,
+      response_format: { type: "json_object" },
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Resumo atual: ${oldSummary || 'Nenhum'}. Nova mensagem: ${userMessage}. Resumo atualizado:` }
+        {
+          role: 'system',
+          content: `Extract ONLY permanent user information from conversations.
+Return JSON:
+{
+  "hasMemorableInfo": true/false,
+  "memories": [
+    {
+      "type": "city|personal|preference|important",
+      "content": "extracted info",
+      "confidence": 0.0-1.0
+    }
+  ],
+  "city": "city name if mentioned (null otherwise)",
+  "summary": "one line summary if memorable, empty otherwise"
+}`
+        },
+        {
+          role: 'user',
+          content: `User said: "${userMessage}"${assistantResponse ? `\nAssistant replied: "${assistantResponse.slice(0, 200)}"` : ''}`
+        }
       ]
     });
-
-    let newSummary = response.choices[0].message.content.trim() || oldSummary;
-    if (newSummary.length > 200) newSummary = oldSummary;
-
-    if (newSummary !== oldSummary) {
-      // Embed and store
-      const embeddingRes = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: newSummary
-      });
-      const vector = embeddingRes.data[0].embedding;
-      await db.collection('profiles').doc(waNumber).collection('memoryVectors').add({
-        summary: newSummary,
-        vector,
-        timestamp: new Date()
-      });
-      // Prune to 10
-      const oldVectors = await db.collection('profiles').doc(waNumber).collection('memoryVectors').orderBy('timestamp', 'desc').limit(11).get();
-      if (oldVectors.size > 10) {
-        oldVectors.docs.slice(10).forEach(doc => doc.ref.delete());
-      }
-    }
-
-    return newSummary;
-  } catch (err) {
-    console.error('[MEMORY] Update error:', err);
-    return oldSummary || '';
+    return JSON.parse(response.choices[0].message.content);
+  } catch (error) {
+    console.error('[Memory] Extraction error:', error);
+    return { hasMemorableInfo: false, memories: [] };
   }
 }
 
-// Get context: Higher threshold, relevance check
+// Merge summaries intelligently
+async function mergeSummaries(current, newInfo) {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.1,
+      max_tokens: 100,
+      messages: [
+        {
+          role: 'system',
+          content: 'Merge these summaries into ONE concise summary (max 150 chars). Keep only permanent info. No questions or temporary data.'
+        },
+        {
+          role: 'user',
+          content: `Current: ${current}\nNew: ${newInfo}`
+        }
+      ]
+    });
+    return response.choices[0].message.content.trim().slice(0, 200);
+  } catch (error) {
+    console.error('[Memory] Merge error:', error);
+    return current;
+  }
+}
+
+// Store memory as vector for semantic search
+async function storeMemoryVector(waNumber, content, type) {
+  try {
+    const embeddingRes = await openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: content.slice(0, 1000)
+    });
+    const vector = embeddingRes.data[0].embedding;
+
+    await db.collection('profiles').doc(waNumber).collection('memoryVectors').add({
+      content,
+      type,
+      vector,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Cleanup old vectors (keep only 20)
+    const vectors = await db.collection('profiles')
+      .doc(waNumber)
+      .collection('memoryVectors')
+      .orderBy('timestamp', 'desc')
+      .limit(21)
+      .get();
+
+    if (vectors.size > 20) {
+      const oldestDoc = vectors.docs[vectors.docs.length - 1];
+      await oldestDoc.ref.delete();
+    }
+
+    console.log(`[Memory] Stored vector: ${type} - ${content.slice(0, 50)}...`);
+  } catch (error) {
+    console.error('[Memory] Vector storage error:', error);
+  }
+}
+
+// Main function to update user memory
+async function updateUserSummary(waNumber, currentSummary, userMessage, assistantResponse = '') {
+  try {
+    const extraction = await extractMemorableInfo(userMessage, assistantResponse);
+    if (!extraction.hasMemorableInfo) {
+      console.log('[Memory] No memorable info found in message');
+      return currentSummary || '';
+    }
+
+    if (extraction.city) {
+      await db.collection('profiles').doc(waNumber).set({
+        city: extraction.city
+      }, { merge: true });
+      console.log(`[Memory] Updated city to: ${extraction.city}`);
+    }
+
+    for (const memory of extraction.memories) {
+      if (memory.confidence >= 0.7) {
+        await storeMemoryVector(waNumber, memory.content, memory.type);
+      }
+    }
+
+    if (extraction.summary) {
+      const finalSummary = currentSummary
+        ? await mergeSummaries(currentSummary, extraction.summary)
+        : extraction.summary;
+
+      await db.collection('profiles').doc(waNumber).set({
+        memory: finalSummary,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      return finalSummary;
+    }
+
+    return currentSummary || '';
+  } catch (error) {
+    console.error('[Memory] Update error:', error);
+    return currentSummary || '';
+  }
+}
+
+// Get relevant memory context for a query
 async function getMemoryContext(waNumber, query) {
   try {
-    if (!query) return '';
-    const queryEmbedding = await openai.embeddings.create({
+    if (!query || query.length < 3) return '';
+
+    const profile = await db.collection('profiles').doc(waNumber).get();
+    const profileData = profile.exists ? profile.data() : {};
+
+    const embeddingRes = await openai.embeddings.create({
       model: 'text-embedding-3-small',
-      input: query
+      input: query.slice(0, 1000)
     });
-    const queryVec = queryEmbedding.data[0].embedding;
+    const queryVector = embeddingRes.data[0].embedding;
 
-    const vectorsSnap = await db.collection('profiles').doc(waNumber).collection('memoryVectors').get();
-    if (vectorsSnap.empty) return '';
+    const vectorsSnapshot = await db.collection('profiles')
+      .doc(waNumber)
+      .collection('memoryVectors')
+      .get();
 
-    let similarities = vectorsSnap.docs.map(doc => {
+    if (vectorsSnapshot.empty) {
+      return formatBasicContext(profileData);
+    }
+
+    const memories = [];
+    vectorsSnapshot.forEach(doc => {
       const data = doc.data();
-      return { id: doc.id, summary: data.summary, sim: cosineSimilarity(queryVec, data.vector) };
-    }).filter(s => s.sim > 0.85) // Higher threshold for relevance
-      .sort((a, b) => b.sim - a.sim)
-      .slice(0, 2);
+      const similarity = cosineSimilarity(queryVector, data.vector);
+      if (similarity > 0.7) {
+        memories.push({
+          content: data.content,
+          type: data.type,
+          similarity: similarity
+        });
+      }
+    });
 
-    if (similarities.length === 0) return ''; // No relevant memory
+    memories.sort((a, b) => b.similarity - a.similarity);
+    const topMemories = memories.slice(0, 3);
 
-    return similarities.map(s => s.summary).join(' | ');
-  } catch (err) {
-    console.error('[MEMORY] Retrieval error:', err);
+    if (topMemories.length === 0) {
+      return formatBasicContext(profileData);
+    }
+
+    return formatMemoryContext(topMemories, profileData);
+  } catch (error) {
+    console.error('[Memory] Context retrieval error:', error);
     return '';
   }
 }
 
-module.exports = { updateUserSummary, getMemoryContext };
+// Format basic context
+function formatBasicContext(profileData) {
+  const parts = [];
+  if (profileData.city) {
+    parts.push(`Cidade: ${profileData.city}`);
+  }
+  if (profileData.memory) {
+    parts.push(`Info: ${profileData.memory}`);
+  }
+  return parts.join(' | ');
+}
+
+// Format memory context nicely
+function formatMemoryContext(memories, profileData) {
+  const contextParts = [];
+  if (profileData.city) {
+    contextParts.push(`Cidade: ${profileData.city}`);
+  }
+  const byType = {};
+  memories.forEach(mem => {
+    if (!byType[mem.type]) byType[mem.type] = [];
+    byType[mem.type].push(mem.content);
+  });
+  if (byType.personal) {
+    contextParts.push(`Pessoal: ${byType.personal.join(', ')}`);
+  }
+  if (byType.preference) {
+    contextParts.push(`Preferências: ${byType.preference.join(', ')}`);
+  }
+  if (byType.important) {
+    contextParts.push(`Importante: ${byType.important.join(', ')}`);
+  }
+  return contextParts.join(' | ');
+}
+
+// Get user's city
+async function getUserCity(waNumber) {
+  try {
+    const profile = await db.collection('profiles').doc(waNumber).get();
+    if (!profile.exists) return '';
+    const data = profile.data();
+    if (data.city) return data.city;
+
+    if (data.memory) {
+      const cityMatch = data.memory.match(/(?:moro em|vivo em|estou em|cidade:?\s*)([A-Za-zÀ-ÿ\s]+?)(?:[,.]|$)/i);
+      if (cityMatch && cityMatch[1]) {
+        const extractedCity = cityMatch[1].trim();
+        await db.collection('profiles').doc(waNumber).set({ city: extractedCity }, { merge: true });
+        return extractedCity;
+      }
+    }
+
+    return '';
+  } catch (error) {
+    console.error('[Memory] City extraction error:', error);
+    return '';
+  }
+}
+
+// Check if a query needs city context
+async function needsCityContext(query) {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      max_tokens: 10,
+      messages: [
+        {
+          role: 'system',
+          content: 'Reply only "yes" or "no". Would this query benefit from knowing the user\'s city?'
+        },
+        {
+          role: 'user',
+          content: query
+        }
+      ]
+    });
+    return response.choices[0].message.content.trim().toLowerCase() === 'yes';
+  } catch (error) {
+    console.error('[Memory] City context check error:', error);
+    return false;
+  }
+}
+
+module.exports = {
+  updateUserSummary,
+  getMemoryContext,
+  getUserCity,
+  needsCityContext,
+  storeMemoryVector
+};
