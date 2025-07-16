@@ -110,7 +110,31 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       console.log('[DEBUG ZAZIL] Memory Context:', memoryContext);
       console.log('[DEBUG ZAZIL] User City:', city);
 
-      // Agentic Flow
+      // Main Answer: Always start with Grok/Perplexity for base response
+      let mainAnswer = '';
+      try {
+        const xaiRes = await axios.post('https://api.x.ai/v1/chat/completions', {
+          model: 'grok-4',
+          temperature: 0.3,
+          max_tokens: 2048,
+          messages: [
+            { role: 'system', content: ZAZIL_PROMPT },
+            { role: 'user', content: incoming + (memoryContext ? ` (contexto anterior: ${memoryContext})` : '') + (city ? ` (em ${city})` : '') }
+          ]
+        }, {
+          headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+          timeout: 5000
+        });
+        mainAnswer = xaiRes.data.choices[0].message.content || '';
+        console.log('[DEBUG ZAZIL] Grok Main Answer:', mainAnswer.slice(0, 200));
+      } catch (xaiErr) {
+        console.error('[DEBUG ZAZIL] Grok Error:', xaiErr.message);
+        const { answer } = await perplexityService.search(incoming + (city ? ` in ${city}` : ''));
+        mainAnswer = answer;
+        console.log('[DEBUG ZAZIL] Perplexity Main Answer:', mainAnswer.slice(0, 200));
+      }
+
+      // Agentic Tools for Enhancement
       let messages = [
         { role: 'system', content: ZAZIL_PROMPT },
         { role: 'user', content: incoming + (memoryContext ? ` (contexto anterior: ${memoryContext})` : '') + (city ? ` (usuário em ${city})` : '') }
@@ -145,36 +169,11 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           messages
         });
         console.log('[DEBUG ZAZIL] Response after Tools:', response.choices[0].message.content);
-      } else {
-        console.log('[DEBUG ZAZIL] No Tool Calls—Falling back to Grok/Perplexity');
-        // Explicit fallback to Grok
-        try {
-          const xaiRes = await axios.post('https://api.x.ai/v1/chat/completions', {
-            model: 'grok-4',
-            temperature: 0.3,
-            max_tokens: 2048,
-            messages
-          }, {
-            headers: { 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-            timeout: 5000
-          });
-          response.choices[0].message.content = xaiRes.data.choices[0].message.content;
-          console.log('[DEBUG ZAZIL] Grok Fallback Used:', response.choices[0].message.content);
-        } catch (xaiErr) {
-          console.error('[DEBUG ZAZIL] Grok Error:', xaiErr.message);
-          const { answer } = await perplexityService.search(incoming + (city ? ` in ${city}` : ''));
-          response.choices[0].message.content = answer;
-          console.log('[DEBUG ZAZIL] Perplexity Fallback Used:', answer);
-        }
+        mainAnswer += '\n\n' + response.choices[0].message.content; // Append tool enhancements to main
       }
 
-      let mainAnswer = response.choices[0].message.content || '';
-
-      // Marketplace Dica fallback
-      let marketplaceDica = '';
-      if (!toolCalls || toolCalls.length === 0) {
-        marketplaceDica = await getMarketplaceDica({ message: incoming, city, context: memorySummary });
-      }
+      // Marketplace Dica as separate portion
+      let marketplaceDica = await getMarketplaceDica({ message: incoming, city, context: memorySummary });
       console.log('[DEBUG ZAZIL] Marketplace Dica:', marketplaceDica);
 
       let dicasBlock = marketplaceDica ? `\n\n${marketplaceDica}` : '\n\nDica do Zazil: Sempre confira em fontes oficiais!';
@@ -182,11 +181,11 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
       let fullContent = mainAnswer.trim() + dicasBlock;
       console.log('[DEBUG ZAZIL] Full Content Length:', fullContent.length);
 
-      // Fact-check and overwrite if needed
-      const factCheck = await perplexityService.search(`Verify facts and add details if missing for: ${fullContent.slice(0, 200)}`);
+      // Fact-check
+      const factCheck = await perplexityService.search(`Verify: ${fullContent.slice(0, 200)}`);
       console.log('[DEBUG ZAZIL] Fact Check:', factCheck.answer);
-      if (factCheck.answer.toLowerCase().includes('incorrect') || factCheck.answer.toLowerCase().includes('hallucination') || factCheck.answer.toLowerCase().includes('correction') || factCheck.answer.toLowerCase().includes('missing')) {
-        fullContent = mainAnswer + '\n\nVerificação: ' + factCheck.answer;
+      if (factCheck.answer.includes('incorrect') || factCheck.answer.includes('hallucination')) {
+        fullContent = 'Desculpe, detectei uma possível imprecisão. Aqui vai uma versão verificada: ' + factCheck.answer;
       }
 
       // Truncation with Firestore
@@ -200,13 +199,13 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           waNumber,
           question: incoming,
           answer: fullContent,
-          createdAt: new Date()
+          created_at: new Date()
         });
         truncateId = docRef.id;
         safeContent = `${short}\n\n👉 Leia a resposta completa: https://zazl-backend.onrender.com/view/${truncateId}`;
       }
 
-      // Postprocess (with dedupe)
+      // Postprocess
       let replyObj = replyHelper.generic(safeContent);
       replyObj = await postprocess(replyObj, incoming);
       console.log('[DEBUG ZAZIL] Postprocessed Content:', replyObj.content.slice(0, 100));
