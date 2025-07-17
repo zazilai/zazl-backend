@@ -255,7 +255,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           createdAt: new Date()
         });
         const truncated = truncateForWhatsapp(finalContent, 850);
-        finalContent = `${truncated}\n\n📖 Resposta completa: ${process.env.PROJECT_URL}/view/${docRef.id}`;
+        finalContent = `${truncated}\n\n📖 Resposta completa: https://zazl-backend.onrender.com/view/${docRef.id}`;
       }
 
       const message = await twilioClient.messages.create({
