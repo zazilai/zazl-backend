@@ -1,85 +1,61 @@
-// helpers/postprocess.js — Great Product, 2025-Compliant
+// helpers/postprocess.js — Cleaned for 2025
 
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Clean various formatting issues
+// Clean up text formatting
 function cleanFormatting(text) {
   if (!text) return '';
   return text
-    // Remove citation markers like [1]
-    .replace(/\s*\[\d+\]/g, '')
-    // Fix multiple line breaks
-    .replace(/\n{3,}/g, '\n\n')
-    // Fix multiple spaces
-    .replace(/\s{2,}/g, ' ')
-    // Remove trailing spaces
-    .replace(/\s+$/gm, '')
-    // Fix markdown bold for WhatsApp
-    .replace(/\*\*(.*?)\*\*/g, '*$1*')
-    // Fix bullet points
-    .replace(/^[-•]\s+/gm, '• ')
-    // Remove empty bullet points
-    .replace(/^•\s*$/gm, '')
+    .replace(/\s*\[\d+\]/g, '')                  // remove citation markers
+    .replace(/\n{3,}/g, '\n\n')                  // reduce excessive line breaks
+    .replace(/\s{2,}/g, ' ')                     // fix multiple spaces
+    .replace(/\s+$/gm, '')                       // remove trailing spaces
+    .replace(/\*\*(.*?)\*\*/g, '*$1*')           // fix bold for WhatsApp
+    .replace(/^[-•]\s+/gm, '• ')                 // normalize bullets
+    .replace(/^•\s*$/gm, '')                     // remove empty bullets
     .trim();
 }
 
-// Remove duplicate "Dica do Zazil" sections
+// Deduplicate Dica do Zazil sections
 function deduplicateDicas(text) {
   const lines = text.split('\n');
   const seen = new Set();
   const result = [];
-  let inDicaSection = false;
   let currentDica = [];
 
   for (const line of lines) {
-    if (line.includes('Dica do Zazil') || line.includes('💡')) {
-      if (inDicaSection && currentDica.length > 0) {
-        const dicaContent = currentDica.join('\n').trim();
-        if (!seen.has(dicaContent)) {
-          seen.add(dicaContent);
-          result.push(dicaContent);
+    if (/💡|Dica do Zazil/i.test(line)) {
+      if (currentDica.length > 0) {
+        const dicaBlock = currentDica.join('\n').trim();
+        if (!seen.has(dicaBlock)) {
+          seen.add(dicaBlock);
+          result.push(dicaBlock);
         }
-      }
-      inDicaSection = true;
-      currentDica = [line];
-    } else if (inDicaSection) {
-      if (line.trim() === '' && currentDica.length > 1) {
-        const dicaContent = currentDica.join('\n').trim();
-        if (!seen.has(dicaContent)) {
-          seen.add(dicaContent);
-          result.push(dicaContent);
-        }
-        inDicaSection = false;
         currentDica = [];
-        result.push('');
-      } else {
-        currentDica.push(line);
       }
+      currentDica.push(line);
+    } else if (currentDica.length > 0) {
+      currentDica.push(line);
     } else {
       result.push(line);
     }
   }
 
-  if (inDicaSection && currentDica.length > 0) {
-    const dicaContent = currentDica.join('\n').trim();
-    if (!seen.has(dicaContent)) {
-      result.push(dicaContent);
+  if (currentDica.length > 0) {
+    const dicaBlock = currentDica.join('\n').trim();
+    if (!seen.has(dicaBlock)) {
+      result.push(dicaBlock);
     }
   }
 
   return result.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
-// Ensure response has proper Zazil personality
+// GPT-powered voice enhancement (adds one warm Brazilian touch if needed)
 async function ensureZazilVoice(content, query) {
-  const hasEmoji = /[😊🎉💡🛒💚🇧🇷]/.test(content);
-  const hasDica = /dica do zazil/i.test(content);
-  const hasWarmth = /\b(querido|amigo|tá bom|né|viu)\b/i.test(content);
-
-  if (hasEmoji && hasDica && hasWarmth) {
-    return content;
-  }
+  const hasPersonality = /[🇧🇷💡😊🎉]|(Dica do Zazil)/i.test(content);
+  if (hasPersonality) return content;
 
   try {
     const response = await openai.chat.completions.create({
@@ -98,120 +74,67 @@ async function ensureZazilVoice(content, query) {
       ]
     });
 
-    const addition = response.choices[0].message.content.trim();
-
+    const addition = response.choices?.[0]?.message?.content?.trim();
     if (addition && addition.length < 100 && !content.includes(addition)) {
       return content + '\n\n' + addition;
     }
-    return content;
-  } catch (error) {
-    console.error('[Postprocess] Voice enhancement error:', error);
-    return content;
+  } catch (err) {
+    console.error('[Zazil Voice] Error:', err);
   }
+
+  return content;
 }
 
-// Check for potential hallucinations or errors
-async function checkQuality(content, query) {
-  if (!content || content.length < 20) {
-    return { hasIssues: true, reason: 'too_short' };
-  }
+// Flag common issues for retry or fallback
+async function checkQuality(content) {
+  const lower = content.toLowerCase();
 
-  const lines = content.split('\n').filter(l => l.trim());
-  const uniqueLines = new Set(lines);
-  if (uniqueLines.size < lines.length * 0.7) {
-    return { hasIssues: true, reason: 'repetitive' };
-  }
-
-  const errorPhrases = [
-    'não tenho acesso',
-    'não posso acessar',
-    'como uma ia',
-    'como um assistente',
-    'i cannot',
-    'i don\'t have access',
-    'error:',
-    'undefined',
-    'null'
+  const issues = [
+    !content || content.length < 20,
+    /não (tenho|posso) acesso|como uma ia|error|undefined|null/i.test(lower),
+    content.split('\n').filter(l => l.trim()).length < 3
   ];
 
-  const lowerContent = content.toLowerCase();
-  for (const phrase of errorPhrases) {
-    if (lowerContent.includes(phrase)) {
-      return { hasIssues: true, reason: 'error_phrase' };
-    }
+  if (issues.some(Boolean)) {
+    return { hasIssues: true };
   }
 
   return { hasIssues: false };
 }
 
-// Format the final response neatly
+// Final formatting cleanup
 function formatFinalResponse(content) {
-  const parts = content.split(/💡\s*(?:\*\*)?\s*Dica do Zazil/i);
-  if (parts.length > 2) {
-    const mainContent = parts[0].trim();
-    const lastDica = parts[parts.length - 1].trim();
-    return `${mainContent}\n\n💡 Dica do Zazil: ${lastDica}`;
-  } else if (parts.length === 2) {
-    const mainContent = parts[0].trim();
-    const dica = parts[1].replace(/[:*]+/, '').trim();
-    return `${mainContent}\n\n💡 Dica do Zazil: ${dica}`;
+  const [main, ...dicas] = content.split(/💡\s*(?:\*\*)?\s*Dica do Zazil[:\*]*/i);
+  if (dicas.length > 0) {
+    return main.trim() + '\n\n💡 Dica do Zazil: ' + dicas.pop().trim();
   }
-  return content
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/\s+$/gm, '')
-    .trim();
+  return content.trim();
 }
 
-// Main postprocess function
+// Main postprocessing flow
 module.exports = async function postprocess(replyObj, incoming) {
   let content = replyObj.content || '';
-  console.log('[Postprocess] Original length:', content.length);
-
-  // Step 1: Clean formatting
   content = cleanFormatting(content);
 
-  // Step 2: Check quality
-  const qualityCheck = await checkQuality(content, incoming);
-  if (qualityCheck.hasIssues) {
-    console.log('[Postprocess] Quality issue detected:', qualityCheck.reason);
-    if (qualityCheck.reason === 'too_short') {
-      content = 'Desculpe, não consegui gerar uma resposta completa. Pode reformular sua pergunta?';
-    } else if (qualityCheck.reason === 'repetitive') {
-      const lines = content.split('\n');
-      const unique = [...new Set(lines)];
-      content = unique.join('\n');
-    } else if (qualityCheck.reason === 'error_phrase') {
-      content = 'Opa, tive um probleminha ao processar sua pergunta. Vamos tentar de novo? Me conta com outras palavras o que você precisa!';
-    }
+  const quality = await checkQuality(content);
+  if (quality.hasIssues) {
+    content = 'Desculpe, não consegui gerar uma resposta completa. Tente reformular a pergunta ou aguarde um momento.';
   }
 
-  // Step 3: Remove duplicate Dicas
   content = deduplicateDicas(content);
-
-  // Step 4: Ensure Zazil voice
   content = await ensureZazilVoice(content, incoming);
-
-  // Step 5: Format final response
   content = formatFinalResponse(content);
 
-  // Step 6: Ensure we have a Dica do Zazil
-  if (!content.includes('Dica do Zazil') && !content.includes('💡')) {
-    const defaultDicas = [
-      'Sempre que precisar, estou aqui para ajudar! 💚',
+  if (!content.includes('Dica do Zazil')) {
+    const extras = [
       'Pergunte sempre que tiver dúvidas sobre vida no exterior!',
-      'A comunidade brasileira está sempre pronta para ajudar!',
-      'Com paciência e jeitinho brasileiro, tudo se resolve! 😊',
-      'Confira sempre as informações em fontes oficiais, tá bom?'
+      'Com paciência e jeitinho brasileiro, tudo se resolve! 🇧🇷',
+      'Estou aqui pra te ajudar sempre que precisar! 💚'
     ];
-    const randomDica = defaultDicas[Math.floor(Math.random() * defaultDicas.length)];
-    content += `\n\n💡 *Dica do Zazil:* ${randomDica}`;
+    const extra = extras[Math.floor(Math.random() * extras.length)];
+    content += `\n\n💡 Dica do Zazil: ${extra}`;
   }
 
-  if (content.length > 1500) {
-    console.log('[Postprocess] Content too long, will be truncated by main flow');
-  }
-
-  console.log('[Postprocess] Final length:', content.length);
   replyObj.content = content;
   return replyObj;
 };
