@@ -1,8 +1,38 @@
 // helpers/partners/eventsDica.js — Updated with Ticketmaster Support (July 2025)
+// To use Ticketmaster, sign up at https://developer.ticketmaster.com/ and add TICKETMASTER_API_KEY to your .env file
 
 const axios = require('axios');
 const cheerio = require('cheerio');
 const perplexityService = require('../perplexity');
+
+// Ticketmaster integration
+const ticketmaster = {
+  async getEvents(city) {
+    const apiKey = process.env.TICKETMASTER_API_KEY;
+    if (!apiKey) {
+      console.warn('[Ticketmaster] Missing API_KEY');
+      return [];
+    }
+    try {
+      const url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${apiKey}&city=${encodeURIComponent(city)}&keyword=brazilian&sort=date,asc&size=5`;
+      const res = await axios.get(url, { timeout: 5000 });
+      if (!res.data._embedded?.events) return [];
+      return res.data._embedded.events.map(event => ({
+        name: event.name,
+        start_at: event.dates?.start?.dateTime,
+        address: {
+          city: event._embedded?.venues?.[0]?.city?.name,
+          local_name: event._embedded?.venues?.[0]?.name,
+          address: event._embedded?.venues?.[0]?.address?.line1
+        },
+        external_shop_url: event.url
+      }));
+    } catch (e) {
+      console.error('[Ticketmaster] Fetch error:', e.message);
+      return [];
+    }
+  }
+};
 
 // Normalize city name
 function normalizeCity(city = '') {
@@ -42,16 +72,6 @@ async function getGroovooEvents(city) {
     return events;
   } catch (e) {
     console.error('[Groovoo] Error:', e.message);
-    return [];
-  }
-}
-
-// Ticketmaster
-async function getTicketmasterEvents(city) {
-  try {
-    return await ticketmaster.getEvents(city);
-  } catch (e) {
-    console.error('[Ticketmaster] Error:', e.message);
     return [];
   }
 }
@@ -113,7 +133,7 @@ module.exports = async function eventsDica(message, userCity, userContext, inten
   if (!city) return 'Dica do Zazil: Me diga sua cidade para eventos personalizados!';
 
   let events = await getGroovooEvents(city);
-  if (!events.length) events = await getTicketmasterEvents(city);
+  if (!events.length) events = await ticketmaster.getEvents(city);
   if (!events.length) events = await getMeetupEvents(city);
   if (!events.length) events = await getFloripaEvents(city);
 
