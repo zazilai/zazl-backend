@@ -2,7 +2,6 @@
 
 const axios = require('axios');
 const cheerio = require('cheerio');
-const ticketmaster = require('../ticketmaster');
 const perplexityService = require('../perplexity');
 
 // Normalize city name
