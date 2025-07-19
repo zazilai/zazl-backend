@@ -154,17 +154,20 @@ async function executeAmazonSearch(args) {
   return result;
 }
 
-// Event search
+// Event search (ensure dica format)
 async function executeEventSearch(args) {
   const { city, query } = args;
+  
   if (!city) {
-    return '🎉 Para encontrar eventos, preciso saber em qual cidade você está. Me diga sua cidade!';
+    return '💡 Dica do Zazil: Para encontrar eventos, preciso saber sua cidade! Me diga onde você está! 🏙️';
   }
+  
+  console.log(`[AgentTools] Searching events in ${city}`);
+  
   const result = await eventsDica(query || 'eventos brasileiros', city, '', 'TOOL_CALL');
-  if (!result || result.includes('Não achei eventos')) {
-    return formatEmptyResult('events', city);
-  }
-  return result;
+  
+  // Result is already formatted as dica
+  return result || '💡 Dica do Zazil: Não encontrei eventos específicos, mas fique de olho nos grupos locais! 🎉';
 }
 
 // Currency rate
