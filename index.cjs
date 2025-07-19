@@ -150,29 +150,21 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         confidence: analysis.confidence
       });
 
-      // 6. Get ONLY Relevant Memory Context
+      // 6. Get ONLY Relevant Memory Context (if useful)
       let memoryContext = '';
       if (analysis.confidence > 0.8) {
-        // Only get memory for high-confidence relevant queries
-        const relevantMemory = await memorySvc.getMemoryContext(waNumber, incoming);
-        if (relevantMemory && relevantMemory !== `Cidade: ${city}`) {
-          memoryContext = relevantMemory;
-        }
+        memoryContext = await memorySvc.getMemoryContext(waNumber, incoming);
       }
       console.log(`[ZAZIL] Memory Context: ${memoryContext || 'none'}`);
 
-      // 7. Build Enhanced Query
-      let mainQuery = incoming;
+      // 7. Build Enhanced Query (without memory to avoid pollution)
+      let searchQuery = incoming;
       
       // Add city only if needed
       if (analysis.needsLocation && city && !incoming.toLowerCase().includes(city.toLowerCase())) {
-        mainQuery = `${incoming} em ${city}`;
-        console.log(`[ZAZIL] Added city to query: ${mainQuery}`);
-      }
-      
-      // Add memory context only if truly relevant
-      if (memoryContext && memoryContext !== `Cidade: ${city}`) {
-        mainQuery += ` (contexto relevante: ${memoryContext})`;
+        const lang = incoming.match(/[a-zA-Z]/) ? 'in' : 'em';  // English vs Portuguese
+        searchQuery = `${incoming} ${lang} ${city}`;
+        console.log(`[ZAZIL] Added city to query: ${searchQuery}`);
       }
 
       // 8. Get Main Answer (Perplexity first for current info)
@@ -183,7 +175,7 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         console.log(`[ZAZIL] Getting main answer...`);
         
         // Always try Perplexity first for potential current info
-        const perplexityResponse = await perplexityService.search(mainQuery, city);
+        const perplexityResponse = await perplexityService.search(searchQuery, city);
         
         if (perplexityResponse?.answer && perplexityResponse.answer.length > 50) {
           mainAnswer = perplexityResponse.answer;
@@ -194,6 +186,12 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
         }
       } catch (perplexityError) {
         console.log(`[ZAZIL] Perplexity failed, falling back to GPT-4o...`);
+        
+        let mainQuery = searchQuery;
+        // Add memory only for GPT fallback if relevant
+        if (memoryContext) {
+          mainQuery += ` (contexto relevante: ${memoryContext})`;
+        }
         
         try {
           const gptResponse = await openai.chat.completions.create({
@@ -213,6 +211,32 @@ app.post('/twilio-whatsapp', loggerMw(db), (req, res) => {
           console.error(`[ZAZIL] All AI services failed:`, gptError);
           mainAnswer = 'Opa, tive um probleminha técnico! 😅 Mas não desista, tente me perguntar de novo ou de outra forma!';
           answerSource = 'fallback';
+        }
+      }
+
+      // 8.5 Personalize with Memory (easter-egg style, only if relevant)
+      if (memoryContext && answerSource !== 'fallback') {
+        try {
+          const personalizeResponse = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              { 
+                role: 'system', 
+                content: `${ZAZIL_PROMPT}\nPersonalize the main answer subtly like a friend would, using the relevant context as an 'easter egg' reference if it naturally fits (e.g., 'Hey, building on your earlier passport question...'). Keep it warm, optional, and don't force it if irrelevant. Preserve the core answer.` 
+              },
+              { 
+                role: 'user', 
+                content: `Main answer: ${mainAnswer}\nRelevant context: ${memoryContext}\nOriginal query: ${incoming}` 
+              }
+            ],
+            temperature: 0.6,
+            max_tokens: 1800
+          });
+          mainAnswer = personalizeResponse.choices[0].message.content || mainAnswer;
+          console.log(`[ZAZIL] Personalized with memory easter egg (${mainAnswer.length} chars)`);
+        } catch (personalizeError) {
+          console.error(`[ZAZIL] Personalization error:`, personalizeError);
+          // Fallback to original mainAnswer
         }
       }
 

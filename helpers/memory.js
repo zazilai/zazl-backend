@@ -158,13 +158,20 @@ async function updateUserSummary(waNumber, currentSummary, userMessage, assistan
   }
 }
 
-// Get relevant memory context for a query
+// Get relevant memory context for a query (with temporal decay and keyword boost)
 async function getMemoryContext(waNumber, query) {
   try {
     if (!query || query.length < 3) return '';
 
     const profile = await db.collection('profiles').doc(waNumber).get();
     const profileData = profile.exists ? profile.data() : {};
+
+    // Quick relevance check - if query is about specific intents, skip unrelated memories
+    const queryLower = query.toLowerCase();
+    const skipMemoryIntents = ['weather', 'time', 'date', 'hello', 'hi', 'oi', 'bom dia', 'boa tarde', 'boa noite'];
+    if (skipMemoryIntents.some(intent => queryLower.includes(intent))) {
+      return profileData.city ? `Cidade: ${profileData.city}` : '';
+    }
 
     const embeddingRes = await openai.embeddings.create({
       model: 'text-embedding-3-small',
@@ -175,26 +182,42 @@ async function getMemoryContext(waNumber, query) {
     const vectorsSnapshot = await db.collection('profiles')
       .doc(waNumber)
       .collection('memoryVectors')
+      .orderBy('timestamp', 'desc')
+      .limit(30)  // Limit to improve performance
       .get();
 
     if (vectorsSnapshot.empty) {
       return formatBasicContext(profileData);
     }
 
+    const now = Date.now();
     const memories = [];
+    
     vectorsSnapshot.forEach(doc => {
       const data = doc.data();
       const similarity = cosineSimilarity(queryVector, data.vector);
-      if (similarity > 0.7) {
+      
+      // Calculate age decay
+      const ageHours = (now - data.timestamp.toDate().getTime()) / (1000 * 60 * 60);
+      const decay = Math.exp(-ageHours / 168);  // 1 week decay
+      
+      // Boost score for exact keyword matches
+      const memoryLower = data.content.toLowerCase();
+      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 3);
+      const keywordBoost = queryWords.some(word => memoryLower.includes(word)) ? 1.2 : 1.0;
+      
+      const score = similarity * decay * keywordBoost;
+      
+      if (score > 0.6) {
         memories.push({
           content: data.content,
           type: data.type,
-          similarity: similarity
+          score: score
         });
       }
     });
 
-    memories.sort((a, b) => b.similarity - a.similarity);
+    memories.sort((a, b) => b.score - a.score);
     const topMemories = memories.slice(0, 3);
 
     if (topMemories.length === 0) {
