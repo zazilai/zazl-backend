@@ -1,13 +1,25 @@
-// helpers/postprocess.js — Great Product Version with AI-Powered Intelligence (Updated for Memory Synergy)
+// helpers/postprocess.js — Great Product Version with Embeddings & Metacognition (Complete)
 
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Cosine similarity function (for embeddings)
+function cosineSimilarity(vecA, vecB) {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] ** 2;
+    normB += vecB[i] ** 2;
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
 
 // Clean formatting using smart patterns
 function cleanFormatting(text) {
   if (!text) return '';
   
-  // Use AI to detect and clean formatting issues
   return text
     .replace(/\s*\[\d+\]/g, '')                  // citations
     .replace(/\n{3,}/g, '\n\n')                  // excessive breaks
@@ -42,7 +54,6 @@ Return the cleaned text maintaining all other content intact.`
     return response.choices[0].message.content.trim();
   } catch (error) {
     console.error('[Postprocess] Dedupe error:', error);
-    // Fallback to simple dedupe
     return simpleDedupe(text);
   }
 }
@@ -52,16 +63,15 @@ function simpleDedupe(text) {
   const sections = text.split(/💡\s*(?:Dica do Zazil)?:?\s*/i);
   if (sections.length <= 2) return text;
   
-  // Keep main content and last dica
   const mainContent = sections[0].trim();
   const lastDica = sections[sections.length - 1].trim();
   
   return `${mainContent}\n\n💡 Dica do Zazil: ${lastDica}`;
 }
 
-// AI-powered quality assessment
+// AI-powered quality assessment with Embeddings & Metacognition
 async function assessContentQuality(content, query) {
-  if (!content || content.length < 20) {
+  if (!content || content.length < 50) {
     return { 
       isValid: false, 
       reason: 'too_short',
@@ -70,41 +80,92 @@ async function assessContentQuality(content, query) {
   }
 
   try {
+    // Get embeddings for semantic relevance
+    const [queryEmb, contentEmb] = await Promise.all([
+      openai.embeddings.create({ 
+        model: 'text-embedding-3-small', 
+        input: query.slice(0, 1000) 
+      }),
+      openai.embeddings.create({ 
+        model: 'text-embedding-3-small', 
+        input: content.slice(0, 1000) 
+      })
+    ]);
+    
+    const relevanceScore = cosineSimilarity(
+      queryEmb.data[0].embedding, 
+      contentEmb.data[0].embedding
+    );
+
+    console.log(`[Postprocess] Semantic relevance score: ${relevanceScore.toFixed(3)}`);
+
+    if (relevanceScore < 0.6 && content.length < 200) {
+      return { 
+        isValid: false, 
+        reason: 'irrelevant', 
+        confidence: 1 - relevanceScore,
+        suggestion: 'Content seems unrelated to the query'
+      };
+    }
+
+    // Metacognitive AI check with thinking
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       temperature: 0,
-      response_format: { type: "json_object" },
       messages: [
         {
           role: 'system',
-          content: `Analyze if this is a valid WhatsApp response or a technical error. Consider personalized references (e.g., nods to past queries) as valid if they tie back to the query.
-
-Return JSON:
+          content: `Self-assess: Is this response valid, complete, and relevant? 
+First, reason briefly in <thinking> tags.
+Then output JSON:
 {
   "isValid": true/false,
   "reason": "valid|too_short|error_message|html_response|code_dump|irrelevant",
   "confidence": 0.0-1.0,
-  "suggestion": "optional improvement suggestion"
-}`
+  "suggestion": "optional improvement"
+}
+
+Consider:
+- Content length: ${content.length} chars
+- Semantic relevance score: ${relevanceScore.toFixed(2)}
+- Personalized references are valid if contextually tied
+- Substantial content (>500 chars) is likely valid unless clearly broken`
         },
-        {
-          role: 'user',
-          content: `Query: "${query}"\n\nResponse to analyze: "${content.slice(0, 500)}"`
+        { 
+          role: 'user', 
+          content: `Query: "${query}"\nResponse preview: "${content.slice(0, 500)}..."`
         }
       ]
     });
     
-    return JSON.parse(response.choices[0].message.content);
+    const rawContent = response.choices[0].message.content;
+    
+    // Extract thinking
+    const thinkingMatch = rawContent.match(/<thinking>(.*?)<\/thinking>/s);
+    if (thinkingMatch) {
+      console.log(`[Postprocess] Metacognition: ${thinkingMatch[1].trim()}`);
+    }
+    
+    // Parse JSON (strip thinking)
+    const jsonStr = rawContent.replace(/<thinking>.*?<\/thinking>/s, '').trim();
+    const result = JSON.parse(jsonStr);
+    
+    // Adaptive override: embeddings trump AI if high relevance
+    if (!result.isValid && relevanceScore > 0.8) {
+      console.log(`[Postprocess] Override: High semantic relevance (${relevanceScore.toFixed(2)})`);
+      result.isValid = true;
+      result.reason = 'valid_embeddings_override';
+    }
+    
+    return result;
   } catch (error) {
     console.error('[Postprocess] Quality assessment error:', error);
-    // If AI fails, assume content is valid
     return { isValid: true, reason: 'ai_check_failed', confidence: 0.5 };
   }
 }
 
 // AI-powered personality enhancement
 async function enhanceWithPersonality(content, query) {
-  // Quick check if already has personality
   if (/[🇧🇷💡😊🎉💚]/.test(content) && /Dica do Zazil/i.test(content)) {
     return content;
   }
@@ -181,12 +242,11 @@ module.exports = async function postprocess(replyObj, incoming) {
   // Step 1: Basic cleaning
   content = cleanFormatting(content);
   
-  // Step 2: AI-powered quality assessment
+  // Step 2: AI-powered quality assessment with embeddings
   const quality = await assessContentQuality(content, incoming);
   console.log('[Postprocess] Quality assessment:', quality);
   
   if (!quality.isValid && quality.confidence > 0.8) {
-    // Only replace for high-confidence issues
     switch (quality.reason) {
       case 'too_short':
         content = 'Opa, não consegui elaborar uma resposta completa. Pode me dar mais detalhes sobre o que precisa? 😊';
@@ -199,7 +259,6 @@ module.exports = async function postprocess(replyObj, incoming) {
         content = 'Hmm, acho que não entendi bem sua pergunta. Pode explicar de outra forma? Estou aqui pra ajudar! 💚';
         break;
       default:
-        // Keep original but log issue
         console.log('[Postprocess] Keeping original despite issue:', quality.reason);
     }
   }
@@ -215,9 +274,8 @@ module.exports = async function postprocess(replyObj, incoming) {
   // Step 5: Smart formatting
   content = await formatIntelligently(content);
   
-  // Step 6: Ensure Dica exists (if not added by AI)
+  // Step 6: Ensure Dica exists
   if (!content.includes('Dica do Zazil')) {
-    // Use AI to generate contextual dica
     try {
       const dicaResponse = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -238,7 +296,6 @@ module.exports = async function postprocess(replyObj, incoming) {
       const dica = dicaResponse.choices[0].message.content.trim();
       content += `\n\n💡 Dica do Zazil: ${dica}`;
     } catch {
-      // Fallback dicas
       const fallbacks = [
         'Conte sempre comigo para suas dúvidas! 💚',
         'A comunidade brasileira está aqui pra apoiar! 🇧🇷',
